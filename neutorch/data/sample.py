@@ -95,7 +95,9 @@ class AbstractSample(ABC):
         return self.output_patch_size + \
             self.transform.shrink_size[:3] + \
             self.transform.shrink_size[-3:]
-    
+
+
+
 # class BlockAlignedVolumeSample(AbstractSample):
 #     def __init__(self, 
 #             inputs: List[AbstractVolume],
@@ -388,8 +390,8 @@ class SampleWithMask(Sample):
             mask: Chunk | PrecomputedVolume, 
             forbbiden_distance_to_boundary: tuple = None,
             patches_in_block: int = 32,
-            candidate_bounding_boxes_path: str = './candidate_bounding_boxes.npy',
-            ) -> None:
+            candidate_bounding_boxes_path: str = None,
+    ) -> None:
         """Image sample with ground truth annotations
 
         Args:
@@ -420,7 +422,7 @@ class SampleWithMask(Sample):
         self.candidate_bounding_boxes_path = candidate_bounding_boxes_path
 
     @classmethod
-    def from_config(cls, config: CfgNode, 
+    def from_config(cls, config: CfgNode,
             output_patch_size: Cartesian) -> SampleWithMask:
         
         inputs = cls.load_inputs(config.inputs)
@@ -434,14 +436,15 @@ class SampleWithMask(Sample):
 
     @cached_property
     def candidate_block_bounding_boxes(self) -> BoundingBoxes:
-        if os.path.exists(self.candidate_bounding_boxes_path):
+        if self.candidate_bounding_boxes_path and os.path.exists(self.candidate_bounding_boxes_path):
             print(f'loading existing nonzero bounding boxes file: {self.candidate_bounding_boxes_path}')
             bboxes = BoundingBoxes.from_file(self.candidate_bounding_boxes_path)
         else:
             bboxes = get_candidate_block_bounding_boxes_with_different_voxel_size(
                 self.mask, self.label.voxel_size, self.label.block_size
             )
-            bboxes.to_file(self.candidate_bounding_boxes_path)
+            if self.candidate_bounding_boxes_path:
+                bboxes.to_file(self.candidate_bounding_boxes_path)
         return bboxes 
 
     @property
@@ -833,9 +836,6 @@ class AffinityMapSample(SemanticSample):
 
 
 class AffinityMapSampleWithMask(SampleWithMask):
-    def __init__(self, inputs: List[PrecomputedVolume], label: Union[Chunk, PrecomputedVolume], output_patch_size: Cartesian, mask: Chunk | PrecomputedVolume, forbbiden_distance_to_boundary: tuple = None, patches_in_block: int = 8, candidate_bounding_boxes_path: str = './candidate_bounding_boxes.npy') -> None:
-        super().__init__(inputs, label, output_patch_size, mask, forbbiden_distance_to_boundary, patches_in_block, candidate_bounding_boxes_path)
-    
     @cached_property
     def transform(self):
         return Compose([
@@ -857,8 +857,9 @@ class AffinityMapSampleWithMask(SampleWithMask):
             Label2AffinityMap(probability=1.),
         ])
 
+
 class SelfSupervisedSample(SampleWithMask):
-    def __init__(self, 
+    def __init__(self,
             inputs: List[Chunk], 
             label: Union[np.ndarray, Chunk], 
             output_patch_size: Cartesian,
@@ -963,7 +964,6 @@ class NeuropilMaskSample(Sample):
         ])
 
 
-
 if __name__ == '__main__':
     import os
     from tqdm import tqdm
@@ -999,5 +999,3 @@ if __name__ == '__main__':
         label *= 255
         lbl = Image.fromarray(label).convert('L')
         lbl.save(os.path.join(OUT_DIR, f'{idx}_label.jpg'))
-
-    
