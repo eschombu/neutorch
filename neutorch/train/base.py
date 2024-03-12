@@ -30,7 +30,7 @@ class TrainerBase(ABC):
             random.seed(cfg.system.seed)
         
         self.cfg = cfg
-        self.patch_size=Cartesian.from_collection(cfg.train.patch_size)
+        self.patch_size = Cartesian.from_collection(cfg.train.patch_size)
 
         # self._split_path_list()
 
@@ -80,16 +80,19 @@ class TrainerBase(ABC):
     @cached_property
     def model(self):
         model = Model(self.cfg.model.in_channels, self.cfg.model.out_channels)
-        if torch.cuda.is_available():
+        if self.cfg.system.gpus > 0 and torch.cuda.is_available():
             gpu_num = torch.cuda.device_count()
             print("Let's use ", gpu_num, " GPUs!")
             # we need to use DistributedDataParallel rather than DataParallel to use multiple GPUs!
             # https://discuss.pytorch.org/t/run-pytorch-on-multiple-gpus/20932/62
-            # device_ids=list(range(torch.cuda.device_count()))
-            model = torch.nn.parallel.DataParallel(
-                model, 
-                device_ids=list(range(torch.cuda.device_count())),
-            )
+            if gpu_num > 1:
+                # device_ids=list(range(torch.cuda.device_count()))
+                model = torch.nn.parallel.DataParallel(
+                    model,
+                    device_ids=list(range(gpu_num)),
+                )
+            else:
+                model.cuda()
         # note that we have to wrap the nn.DataParallel(model) before 
         # loading the model since the dictionary is changed after the wrapping 
         model = load_chkpt(
@@ -126,9 +129,9 @@ class TrainerBase(ABC):
     def training_data_loader(self):
         training_data_loader = DataLoader(
             self.training_dataset,
-            #num_workers=self.cfg.system.cpus,
-            num_workers=0,
-            prefetch_factor=2,
+            num_workers=self.cfg.system.cpus,
+            # num_workers=0,
+            prefetch_factor=(2 if self.cfg.system.cpus > 0 else None),
             drop_last=False,
             # multiprocessing_context='spawn',
             collate_fn=collate_batch,
@@ -141,8 +144,8 @@ class TrainerBase(ABC):
     def validation_data_loader(self):
         validation_data_loader = DataLoader(
             self.validation_dataset,
-            num_workers=0,
-            prefetch_factor=2,
+            num_workers=self.cfg.system.cpus,
+            prefetch_factor=(2 if self.cfg.system.cpus > 0 else None),
             drop_last=False,
             # multiprocessing_context='spawn',
             collate_fn=collate_batch,
@@ -173,10 +176,9 @@ class TrainerBase(ABC):
             target = self.label_to_target(label)
 
             iter_idx += 1
-            if iter_idx> self.cfg.train.iter_stop:
+            if iter_idx > self.cfg.train.iter_stop:
                 print('exceeds the maximum iteration: ', self.cfg.train.iter_stop)
                 return
-                
 
             ping = time()
             # print(f'preparing patch takes {round(time()-ping, 3)} seconds')
