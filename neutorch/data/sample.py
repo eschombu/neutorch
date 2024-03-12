@@ -84,7 +84,7 @@ class AbstractSample(ABC):
 #             images: List[AbstractVolume],
 #             label: AbstractVolume,
 #             output_patch_size: Cartesian,
-#             forbbiden_distance_to_boundary: tuple = None,
+#             forbidden_distance_to_boundary: tuple = None,
 #         ):
 #         """sample patches inside blocks of volume
 #         This will reduce the cost of reading and decompression by avoiding patches cross blocks.
@@ -93,7 +93,7 @@ class AbstractSample(ABC):
 #             images (List[AbstractVolume]): image volumes.
 #             label (AbstractVolume): the label volume.
 #             output_patch_size (Cartesian): output patch size.
-#             forbbiden_distance_to_boundary (tuple, optional): minimum distance to boundary. Defaults to None.
+#             forbidden_distance_to_boundary (tuple, optional): minimum distance to boundary. Defaults to None.
 #         """
 #         super().__init__(output_patch_size=output_patch_size)
 #         self.images = images
@@ -102,7 +102,7 @@ class AbstractSample(ABC):
 #         self.patch_bbox_generator = PatchBoundingBoxGenerator(
 #             self.patch_size_before_transform,
 #             self.images[0].bounding_box,
-#             forbbiden_distance_to_boundary=forbbiden_distance_to_boundary,
+#             forbidden_distance_to_boundary=forbidden_distance_to_boundary,
 #         )
 
 #     @property
@@ -119,7 +119,7 @@ class Sample(AbstractSample):
             images: List[Chunk | PrecomputedVolume],
             label: Chunk | PrecomputedVolume,
             output_patch_size: Cartesian, 
-            forbbiden_distance_to_boundary: tuple = None) -> None:
+            forbidden_distance_to_boundary: tuple = None) -> None:
         """Image sample with ground truth annotations
 
         Args:
@@ -127,7 +127,7 @@ class Sample(AbstractSample):
             label (np.ndarray): training label
             patch_size (Cartesian): output patch size. this should be the patch_size before transform. 
                 the patch is expected to be shrinked to be the output patch size.
-            forbbiden_distance_to_boundary (Union[tuple, int]): 
+            forbidden_distance_to_boundary (Union[tuple, int]): 
                 the distance from patch center to sample boundary that is not allowed to sample 
                 the order is z,y,x,-z,-y,-x
                 if this is an integer, then all dimension is the same.
@@ -154,19 +154,19 @@ class Sample(AbstractSample):
         # for ps, ls in zip(self.output_patch_size, label.shape[-3:]):
         #     assert ls >= ps, f'output patch size: {self.output_patch_size}, label shape: {label.shape}'
 
-        if forbbiden_distance_to_boundary is None:
-            forbbiden_distance_to_boundary = self.patch_size_before_transform // 2 
-        assert len(forbbiden_distance_to_boundary) == 3 or len(forbbiden_distance_to_boundary)==6
+        if forbidden_distance_to_boundary is None:
+            forbidden_distance_to_boundary = self.patch_size_before_transform // 2 
+        assert len(forbidden_distance_to_boundary) == 3 or len(forbidden_distance_to_boundary)==6
 
         for idx in range(3):
             # the center of random patch should not be too close to boundary
             # otherwise, the patch will go outside of the volume
-            assert forbbiden_distance_to_boundary[idx] >= self.patch_size_before_transform[idx] // 2
-            assert forbbiden_distance_to_boundary[-idx] >= self.patch_size_before_transform[-idx] // 2
+            assert forbidden_distance_to_boundary[idx] >= self.patch_size_before_transform[idx] // 2
+            assert forbidden_distance_to_boundary[-idx] >= self.patch_size_before_transform[-idx] // 2
         
-        self.center_start = forbbiden_distance_to_boundary[:3]
+        self.center_start = forbidden_distance_to_boundary[:3]
         self.center_stop = tuple(s - d for s, d in zip(
-            images[0].shape[-3:], forbbiden_distance_to_boundary[-3:]))
+            images[0].shape[-3:], forbidden_distance_to_boundary[-3:]))
         # for cs, cp in zip(self.center_start, self.center_stop):
         #     assert cp > cs, \
         #         f'center start: {self.center_start}, center stop: {self.center_stop}'
@@ -251,7 +251,7 @@ class SampleWithMask(Sample):
             label: Union[Chunk, PrecomputedVolume],
             output_patch_size: Cartesian,
             mask: Chunk | PrecomputedVolume, 
-            forbbiden_distance_to_boundary: tuple = None,
+            forbidden_distance_to_boundary: tuple = None,
             patches_in_block: int = 8,
             nonzero_bounding_boxes_path: str = None,
             ) -> None:
@@ -263,7 +263,7 @@ class SampleWithMask(Sample):
             output_patch_size (Cartesian): output patch size. this should be the patch_size before transform. 
                 the patch is expected to be shrinked to be the output patch size.
             mask (Chunk | PrecomputedVolume): neuropil mask that indicates inside of neuropil.
-            forbbiden_distance_to_boundary (Union[tuple, int]): 
+            forbidden_distance_to_boundary (Union[tuple, int]): 
                 the distance from patch center to sample boundary that is not allowed to sample 
                 the order is z,y,x,-z,-y,-x
                 if this is an integer, then all dimension is the same.
@@ -275,7 +275,7 @@ class SampleWithMask(Sample):
         """
         super().__init__(
             images, label, output_patch_size=output_patch_size, 
-            forbbiden_distance_to_boundary=forbbiden_distance_to_boundary)
+            forbidden_distance_to_boundary=forbidden_distance_to_boundary)
         assert patches_in_block > 0
         self.mask = mask
         self.patch_number = 0
@@ -296,7 +296,7 @@ class SampleWithMask(Sample):
         label = PrecomputedVolume.from_cloudvolume_path(config.label)
         mask = PrecomputedVolume.from_cloudvolume_path(config.mask)
         opt_args = {
-            'forbbiden_distance_to_boundary': config.get('forbbiden_distance_to_boundary'),
+            'forbidden_distance_to_boundary': config.get('forbidden_distance_to_boundary'),
             'patches_in_block': config.get('patches_in_block'),
             'nonzero_bounding_boxes_path': config.get('nonzero_bounding_boxes_path'),
         }
@@ -360,14 +360,14 @@ class SampleWithPointAnnotation(Sample):
             images: List[Chunk], 
             annotation_points: np.ndarray,
             output_patch_size: Cartesian, 
-            forbbiden_distance_to_boundary: tuple = None) -> None:
+            forbidden_distance_to_boundary: tuple = None) -> None:
         """Image sample with ground truth annotations
 
         Args:
             image (np.ndarray): image normalized to 0-1
             annotation_points (np.ndarray): point annotations with zyx order.
             output_patch_size (Cartesian): output patch size
-            forbbiden_distance_to_boundary (tuple, optional): sample patches far away 
+            forbidden_distance_to_boundary (tuple, optional): sample patches far away 
                 from sample boundary. Defaults to None.
         """
 
@@ -378,7 +378,7 @@ class SampleWithPointAnnotation(Sample):
         super().__init__(
             images, label, 
             output_patch_size = output_patch_size,
-            forbbiden_distance_to_boundary=forbbiden_distance_to_boundary
+            forbidden_distance_to_boundary=forbidden_distance_to_boundary
         )
 
     @property
@@ -492,8 +492,8 @@ class SemanticSample(Sample):
             label: Union[np.ndarray, Chunk], 
             output_patch_size: Cartesian,
             num_classes: int = DEFAULT_NUM_CLASSES,
-            forbbiden_distance_to_boundary: tuple = None) -> None:
-        super().__init__(images, label, output_patch_size, forbbiden_distance_to_boundary)
+            forbidden_distance_to_boundary: tuple = None) -> None:
+        super().__init__(images, label, output_patch_size, forbidden_distance_to_boundary)
         # number of classes
         self.num_classes = num_classes
 
@@ -576,12 +576,12 @@ class OrganelleSample(SemanticSample):
             label: Union[np.ndarray, Chunk], 
             output_patch_size: Cartesian, 
             num_classes: int = DEFAULT_NUM_CLASSES, 
-            forbbiden_distance_to_boundary: tuple = None,
+            forbidden_distance_to_boundary: tuple = None,
             skip_classes: list = None,
             selected_classes: list = None) -> None:
         super().__init__(images, label, output_patch_size, 
             num_classes=num_classes, 
-            forbbiden_distance_to_boundary=forbbiden_distance_to_boundary)
+            forbidden_distance_to_boundary=forbidden_distance_to_boundary)
 
         if skip_classes is not None:
             for class_idx in skip_classes:
@@ -618,12 +618,12 @@ class AffinityMapSample(SemanticSample):
             images: List[Chunk], 
             label: Union[np.ndarray, Chunk], 
             output_patch_size: Cartesian, 
-            forbbiden_distance_to_boundary: tuple = None,
+            forbidden_distance_to_boundary: tuple = None,
             num_classes: int = 3) -> None:
         super().__init__(
             images, label, output_patch_size, 
             num_classes=num_classes,
-            forbbiden_distance_to_boundary = forbbiden_distance_to_boundary, 
+            forbidden_distance_to_boundary = forbidden_distance_to_boundary, 
         )
         # number of classes
     
@@ -681,10 +681,10 @@ class AffinityMapSampleWithMask(SampleWithMask):
             images: List[PrecomputedVolume],
             label: Union[Chunk, PrecomputedVolume],
             output_patch_size: Cartesian, mask: Chunk | PrecomputedVolume,
-            forbbiden_distance_to_boundary: tuple = None,
+            forbidden_distance_to_boundary: tuple = None,
             patches_in_block: int = 8,
             nonzero_bounding_boxes_path: str = None) -> None:
-        super().__init__(images, label, output_patch_size, mask, forbbiden_distance_to_boundary, patches_in_block,
+        super().__init__(images, label, output_patch_size, mask, forbidden_distance_to_boundary, patches_in_block,
                          nonzero_bounding_boxes_path)
     
     @cached_property
@@ -714,8 +714,8 @@ class SelfSupervisedSample(Sample):
             images: List[Chunk], 
             label: Union[np.ndarray, Chunk], 
             output_patch_size: Cartesian, 
-            forbbiden_distance_to_boundary: tuple = None) -> None:
-        super().__init__(images, label, output_patch_size, forbbiden_distance_to_boundary)
+            forbidden_distance_to_boundary: tuple = None) -> None:
+        super().__init__(images, label, output_patch_size, forbidden_distance_to_boundary)
 
     @classmethod
     def from_explicit_paths(cls, 
@@ -761,7 +761,7 @@ class NeuropilMaskSample(Sample):
             label: Union[Chunk, AbstractVolume], 
             output_patch_size: Cartesian,
             mip: int = 3,
-            forbbiden_distance_to_boundary: tuple = None) -> None:
+            forbidden_distance_to_boundary: tuple = None) -> None:
         """Train a model to predict neuropil mask.
         The patch sampling is biased to neuropil mask boundary.
 
@@ -769,9 +769,9 @@ class NeuropilMaskSample(Sample):
             images (List[Chunk, AbstractVolume]): candidate images
             label (Union[Chunk, AbstractVolume]): neuropil mask with a lower resolution.
             output_patch_size (Cartesian): 
-            forbbiden_distance_to_boundary (tuple, optional): _description_. Defaults to None.
+            forbidden_distance_to_boundary (tuple, optional): _description_. Defaults to None.
         """
-        super().__init__(images, label, output_patch_size, forbbiden_distance_to_boundary)
+        super().__init__(images, label, output_patch_size, forbidden_distance_to_boundary)
     
     @classmethod
     def from_explicit_path(cls, 
