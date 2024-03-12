@@ -14,7 +14,7 @@ class AbstractPatchBoundingBoxGenerator(ABC):
     def __init__(self, 
             patch_size: Cartesian, 
             volume_bbox: BoundingBox,
-            forbbiden_distance_to_boundary: Cartesian = None
+            forbidden_distance_to_boundary: Cartesian = None
         ) -> None:
         super().__init__()
         assert isinstance(patch_size, Cartesian)
@@ -22,10 +22,10 @@ class AbstractPatchBoundingBoxGenerator(ABC):
         self.patch_size = patch_size
         self.volume_bbox = volume_bbox
 
-        if forbbiden_distance_to_boundary is None:
-            forbbiden_distance_to_boundary = self.patch_size_before_transform // 2
-        assert len(forbbiden_distance_to_boundary) == 3 or len(forbbiden_distance_to_boundary)==6
-        self.forbbiden_distance_to_boundary = forbbiden_distance_to_boundary
+        if forbidden_distance_to_boundary is None:
+            forbidden_distance_to_boundary = self.patch_size_before_transform // 2
+        assert len(forbidden_distance_to_boundary) == 3 or len(forbidden_distance_to_boundary)==6
+        self.forbidden_distance_to_boundary = forbidden_distance_to_boundary
 
     @abstractproperty
     def patch_bbox(self):
@@ -36,30 +36,30 @@ class PatchBoundingBoxGeneratorInChunk(AbstractPatchBoundingBoxGenerator):
     def __init__(self, 
             patch_size: Cartesian, 
             volume_bbox: BoundingBox,
-            forbbiden_distance_to_boundary: tuple = None
+            forbidden_distance_to_boundary: tuple = None
         ) -> None:
         super().__init__(
             patch_size, volume_bbox, 
-            forbbiden_distance_to_boundary=forbbiden_distance_to_boundary
+            forbidden_distance_to_boundary=forbidden_distance_to_boundary
         )
 
-        if forbbiden_distance_to_boundary is None:
+        if forbidden_distance_to_boundary is None:
             left = patch_size // 2
             # ceiling division
             right = -(-patch_size // 2)
-            forbbiden_distance_to_boundary = left.tuple + right.tuple
+            forbidden_distance_to_boundary = left.tuple + right.tuple
 
         for idx in range(3):
             # the center of random patch should not be too close to boundary
             # otherwise, the patch will go outside of the volume
-            assert forbbiden_distance_to_boundary[idx] >= self.patch_size_before_transform[idx] // 2
-            assert forbbiden_distance_to_boundary[-idx] >= self.patch_size_before_transform[-idx] // 2
+            assert forbidden_distance_to_boundary[idx] >= self.patch_size_before_transform[idx] // 2
+            assert forbidden_distance_to_boundary[-idx] >= self.patch_size_before_transform[-idx] // 2
         
         self.center_start = Cartesian.from_collection(
-            forbbiden_distance_to_boundary[:3])
+            forbidden_distance_to_boundary[:3])
         self.center_stop = Cartesian.from_collection(
             tuple(s - d for s, d in zip(
-            volume_bbox.shape[-3:], forbbiden_distance_to_boundary[-3:]
+            volume_bbox.shape[-3:], forbidden_distance_to_boundary[-3:]
         )))
         assert self.center_stop > self.center_start, \
             f'center start: {self.center_start}, center stop: {self.center_stop}'
@@ -86,7 +86,7 @@ class PatchBoundingBoxGeneratorInsideMask(PatchBoundingBoxGeneratorInChunk):
     def __init__(self, 
             patch_size: Cartesian, image_volume: AbstractVolume, 
             mask_volume: AbstractVolume,
-            forbbiden_distance_to_boundary: tuple = None,
+            forbidden_distance_to_boundary: tuple = None,
             ) -> None:
         """Generate patch location that is inside a mask.
         The mask is normally a downsampled volume that could be loaded in RAM.
@@ -96,12 +96,12 @@ class PatchBoundingBoxGeneratorInsideMask(PatchBoundingBoxGeneratorInChunk):
             image_volume (AbstractVolume): volume of image
             mask_volume (AbstractVolume): a binary volume that the ROI is 1 and the background is 0.
             patch_voxel_size (Cartesian): the voxel size of the image or patch for training.
-            forbbiden_distance_to_boundary (tuple, optional): 
+            forbidden_distance_to_boundary (tuple, optional): 
                 distance from the boundary of patch to boundary of volume or chunk. 
                 Defaults to None.
         """
         super().__init__(
-            patch_size, image_volume.bounding_box, forbbiden_distance_to_boundary)
+            patch_size, image_volume.bounding_box, forbidden_distance_to_boundary)
         self.image_volume = image_volume
         self.mask_volume = mask_volume
         
@@ -146,10 +146,10 @@ class PatchBoundingBoxGeneratorInsideMask(PatchBoundingBoxGeneratorInChunk):
         # select a random block
         bbox = choice(self.candidate_block_bounding_boxes)
         range_start = bbox.start + Cartesian.from_collection(
-            self.forbbiden_distance_to_boundary[:3])
+            self.forbidden_distance_to_boundary[:3])
         range_stop = bbox.stop - self.patch_size - \
             Cartesian.from_collection(
-                self.forbbiden_distance_to_boundary[-3:]
+                self.forbidden_distance_to_boundary[-3:]
             )
         range_bbox = BoundingBox(range_start, range_stop)
         patch_start = range_bbox.random_coordinate
