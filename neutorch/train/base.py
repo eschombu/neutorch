@@ -32,7 +32,7 @@ class TrainerBase(pl.Trainer):
         cfg.freeze()
                
         self.cfg = cfg
-        self.patch_size=Cartesian.from_collection(cfg.train.patch_size)
+        self.patch_size = Cartesian.from_collection(cfg.train.patch_size)
 
     @cached_property
     def batch_size(self):
@@ -77,7 +77,7 @@ class TrainerBase(pl.Trainer):
     @cached_property
     def model(self):
         model = Model(self.cfg.model.in_channels, self.cfg.model.out_channels)
-                           
+
         if 'preload' in self.cfg.train:
             fname = self.cfg.train.preload
         else:
@@ -98,7 +98,6 @@ class TrainerBase(pl.Trainer):
 
     @cached_property
     def training_data_loader(self):
-        
         dataloader = torch.utils.data.DataLoader(
             self.training_dataset,
             batch_size=self.batch_size,
@@ -108,7 +107,6 @@ class TrainerBase(pl.Trainer):
     
     @cached_property
     def validation_data_loader(self):
-        
         dataloader = torch.utils.data.DataLoader(
             self.validation_dataset,
             batch_size=self.batch_size,
@@ -132,3 +130,65 @@ class TrainerBase(pl.Trainer):
             return torch.sigmoid(prediction)
         else:
             return prediction
+
+    # def __call__(self) -> None:
+    #     writer = SummaryWriter(log_dir=self.cfg.train.output_dir)
+    #     accumulated_loss = 0.
+    #     iter_idx = self.cfg.train.iter_start
+    #     for image, label in self.training_data_loader:
+    #         target = self.label_to_target(label)
+    #
+    #         iter_idx += 1
+    #         if iter_idx > self.cfg.train.iter_stop:
+    #             print('exceeds the maximum iteration: ', self.cfg.train.iter_stop)
+    #             return
+    #
+    #         ping = time()
+    #         # print(f'preparing patch takes {round(time()-ping, 3)} seconds')
+    #         predict = self.model(image)
+    #         # predict = self.post_processing(predict)
+    #         loss = self.loss_module(predict, target)
+    #         self.optimizer.zero_grad()
+    #         loss.backward()
+    #         self.optimizer.step()
+    #         accumulated_loss += loss.tolist()
+    #         print(f'iteration {iter_idx} takes {round(time()-ping, 3)} seconds.')
+    #
+    #         if iter_idx % self.cfg.train.training_interval == 0 and iter_idx > 0:
+    #             per_voxel_loss = accumulated_loss / \
+    #                 self.cfg.train.training_interval / \
+    #                 self.voxel_num
+    #
+    #             print(f'training loss {round(per_voxel_loss, 3)}')
+    #             accumulated_loss = 0.
+    #             predict = self.post_processing(predict)
+    #             writer.add_scalar('Loss/train', per_voxel_loss, iter_idx)
+    #             log_tensor(writer, 'train/image', image, 'image', iter_idx)
+    #             log_tensor(writer, 'train/prediction', predict.detach(), 'image', iter_idx)
+    #             log_tensor(writer, 'train/target', target, 'image', iter_idx)
+    #
+    #         if iter_idx % self.cfg.train.validation_interval == 0 and iter_idx > 0:
+    #             fname = os.path.join(self.cfg.train.output_dir, f'model_{iter_idx}.chkpt')
+    #             print(f'save model to {fname}')
+    #
+    #             if iter_idx >= self.cfg.train.start_saving:
+    #                 save_chkpt(self.model, self.cfg.train.output_dir,
+    #                     iter_idx, self.optimizer
+    #                 )
+    #
+    #             print('evaluate prediction: ')
+    #             validation_image, validation_label = next(self.validation_data_iter)
+    #             validation_target = self.label_to_target(validation_label)
+    #
+    #             with torch.no_grad():
+    #                 validation_predict = self.model(validation_image)
+    #                 validation_loss = self.loss_module(validation_predict, validation_target)
+    #                 validation_predict = self.post_processing(validation_predict)
+    #                 per_voxel_loss = validation_loss.tolist() / self.voxel_num
+    #                 print(f'iter {iter_idx}: validation loss: {round(per_voxel_loss, 3)}')
+    #                 writer.add_scalar('Loss/validation', per_voxel_loss, iter_idx)
+    #                 log_tensor(writer, 'evaluate/image', validation_image, 'image', iter_idx)
+    #                 log_tensor(writer, 'evaluate/prediction', validation_predict, 'image', iter_idx)
+    #                 log_tensor(writer, 'evaluate/target', validation_target, 'image', iter_idx)
+    #
+    #     writer.close()

@@ -58,7 +58,7 @@ def path_to_dataset_name(path: str, dataset_names: list):
         if dataset_name in path:
             return dataset_name
 
-def to_tensor(arr):
+def to_tensor(arr, cuda=False):
     if isinstance(arr, np.ndarray):
         # Pytorch only supports types: float64, float32, float16, complex64, complex128, int64, int32, int16, int8, uint8, and bool.
         if np.issubdtype(arr.dtype, np.uint16):
@@ -66,14 +66,15 @@ def to_tensor(arr):
         elif np.issubdtype(arr.dtype, np.uint64):
             arr = arr.astype(np.int64)
         arr = torch.tensor(arr)
-    # if torch.cuda.is_available():
-    #     arr = arr.cuda()
+    if cuda and torch.cuda.is_available():
+        arr = arr.cuda()
     return arr
 
 
 class DatasetBase(torch.utils.data.Dataset):
     def __init__(self,
-            samples: List[AbstractSample], 
+            samples: List[AbstractSample],
+            cuda=True,
         ):
         """
         Parameters:
@@ -83,6 +84,7 @@ class DatasetBase(torch.utils.data.Dataset):
         print(f'got {len(samples)} samples.')
         assert len(samples) > 0
         self.samples = samples
+        self.cuda = cuda
 
     @classmethod
     def from_config_v5(cls, 
@@ -161,6 +163,11 @@ class DatasetBase(torch.utils.data.Dataset):
             patch_num += len(sample)
         assert patch_num > 0
         return patch_num
+
+    def __next__(self):
+        image_chunk, label_chunk = self.random_patch
+        image = to_tensor(image_chunk.array, self.cuda)
+        label = to_tensor(label_chunk.array, self.cuda)
 
     def __getitem__(self, index: int):
         """return a random patch from a random sample
@@ -281,15 +288,12 @@ class OrganelleDataset(SemanticDataset):
         image, label = self.random_patch
         # transform to PyTorch Tensor
         # transfer to device, e.g. GPU, automatically.
-        image = to_tensor(image)
-        target = to_tensor(label)
+        image = to_tensor(image, self.cuda)
+        target = to_tensor(label, self.cuda)
 
         return image, target
 
 class VolumeWithMask(DatasetBase):
-    def __init__(self, samples: List[AbstractSample]):
-        super().__init__(samples)
-
     @classmethod
     def from_config(cls, cfg: CfgNode, mode: str = 'training', **kwargs):
         """construct volume with mask dataset
@@ -312,7 +316,7 @@ class VolumeWithMask(DatasetBase):
             sample = sample_class.from_config(
                 sample_cfg, output_patch_size)
             samples.append(sample)
-        return cls(samples)
+        return cls(samples, cuda=(cfg.system.gpus > 0))
 
     def __len__(self):
         # num = 0
@@ -325,6 +329,7 @@ class VolumeWithMask(DatasetBase):
         return 10240
         # return int(1e10)
         # return 10
+
 
 class AffinityMapDataset(DatasetBase):
     def __init__(self, samples: list):
