@@ -241,8 +241,10 @@ class AffinityMapVolumeWithMask(DatasetBase):
         for sample_name in cfg.samples:
             sample_cfg = cfg.samples[sample_name]
             sample_class = eval(sample_cfg.type)
+            mask_filename = os.path.splitext(os.path.split(sample_cfg.mask.split('#')[0])[1])[0]
+            sample_nz_bbox_path = f'{sample_name}_{mask_filename}_nonzero_bboxes.npy'
             sample = sample_class.from_config(
-                sample_cfg, output_patch_size)
+                sample_cfg, output_patch_size, nonzero_bounding_boxes_path=sample_nz_bbox_path)
             samples.append(sample)
         return cls(samples, cuda=(cfg.system.gpus > 0))
 
