@@ -189,14 +189,15 @@ class TrainerBase(ABC):
             loss.backward()
             self.optimizer.step()
             accumulated_loss += loss.tolist()
-            print(f'iteration {iter_idx} takes {round(time()-ping, 3)} seconds.')
+            # print(f'iteration {iter_idx} takes {round(time()-ping, 3)} seconds.')
 
             if iter_idx % self.cfg.train.training_interval == 0 and iter_idx > 0:
                 per_voxel_loss = accumulated_loss / \
                     self.cfg.train.training_interval / \
                     self.voxel_num
+                per_iter_seconds = round((time() - ping) / self.cfg.train.training_interval, 3)
 
-                print(f'training loss {round(per_voxel_loss, 3)}')
+                print(f'Iteration {iter_idx}: training loss {round(per_voxel_loss, 3)}, {per_iter_seconds} sec/iter')
                 accumulated_loss = 0.
                 predict = self.post_processing(predict)
                 writer.add_scalar('Loss/train', per_voxel_loss, iter_idx)
