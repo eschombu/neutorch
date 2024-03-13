@@ -21,10 +21,12 @@ from .patch import expand_to_4d
 from neutorch.data.patch import Patch
 # from .patch_bounding_box_generator import PatchBoundingBoxGeneratorInChunk, PatchBoundingBoxGeneratorInsideMask
 from neutorch.data.transform import *
+from neutorch.utils.log_utils import get_logger
 
 DEFAULT_PATCH_SIZE = Cartesian(128, 128, 128)
 DEFAULT_NUM_CLASSES = 1
 
+<<<<<<< HEAD
 def load_chunks_or_volumes(paths: List[str]):
     inputs = []
     for image_path in paths:
@@ -32,6 +34,10 @@ def load_chunks_or_volumes(paths: List[str]):
         inputs.append(image_vol)
     return inputs 
  
+=======
+logger = get_logger()
+
+>>>>>>> 633109e (use python logging instead of print statements in whole-brain training)
 
 class AbstractSample(ABC):
     def __init__(self, output_patch_size: Cartesian, 
@@ -334,15 +340,15 @@ class Sample(AbstractSample):
             label_patch = deepcopy(input_patch)
         else:
             label_patch = label_cv.cutout(bbox)
-        
+
         if input_patch.shape[-3:] != self.patch_size_before_transform.tuple:
             print(f'center: {center}, start: {start}, bbox: {bbox}')
             breakpoint()
-        # print(f'start: {(bz, by, bx)}, patch size: {self.output_patch_size}')
+        logger.debug(f'start: {(bz, by, bx)}, patch size: {self.output_patch_size}')
         assert input_patch.shape[-1] == input_patch.shape[-2], f'image patch shape: {input_patch.shape}'
         assert input_patch.shape[-3:] == self.patch_size_before_transform.tuple, \
             f'image patch shape: {input_patch.shape}, patch size before transform: {self.patch_size_before_transform}'
-        # if we do not copy here, the augmentation will change our 
+        # if we do not copy here, the augmentation will change our
         # image and label sample!
         input_patch.array = expand_to_4d(input_patch.array).copy()
         label_patch.array = expand_to_4d(label_patch.array).copy()
@@ -356,13 +362,12 @@ class Sample(AbstractSample):
     def random_patch(self):
         patch = self.patch_from_center(self.random_patch_center)
 
-        # print(f'computed patch size before transform: {self.patch_size_before_transform}')
-        # print(f'transforms: {self.transform}') 
-        # print(f'patch size before transform: {patch.shape}')
-        # skip the transform in validation mode
+        logger.debug(f'transforms: {self.transform}')
+        logger.debug(f'patch size before transform: {patch.shape}')
         if self.is_train:
             self.transform(patch)
-        # print(f'patch size after transform: {patch.shape}')
+        logger.debug(f'patch size after transform: {patch.shape}')
+        # breakpoint()
         assert patch.shape[-3:] == self.output_patch_size, \
             f'get patch shape: {patch.shape}, expected patch size {self.output_patch_size}'
         assert patch.ndim == 4
@@ -436,7 +441,7 @@ class SampleWithMask(Sample):
     @cached_property
     def candidate_block_bounding_boxes(self) -> BoundingBoxes:
         if self.candidate_bounding_boxes_path and os.path.exists(self.candidate_bounding_boxes_path):
-            print(f'loading existing nonzero bounding boxes file: {self.candidate_bounding_boxes_path}')
+            logger.info(f'loading existing nonzero bounding boxes file: {self.candidate_bounding_boxes_path}')
             bboxes = BoundingBoxes.from_file(self.candidate_bounding_boxes_path)
         else:
             bboxes = get_candidate_block_bounding_boxes_with_different_voxel_size(
@@ -640,13 +645,13 @@ class SemanticSample(Sample):
             **kwargs,
             ):
         label = load_chunk_or_volume(label_path, **kwargs)
-        # print(f'label path: {label_path} with size {label.shape}')
+        logger.debug(f'label path: {label_path} with size {label.shape}')
 
         inputs = []
         for image_path in image_paths:
             image = load_chunk_or_volume(image_path, **kwargs)
             inputs.append(image)
-            # print(f'image path: {image_path} with size {image.shape}')
+            logger.debug(f'image path: {image_path} with size {image.shape}')
         return cls(inputs, label, output_patch_size, num_classes=num_classes)
 
     @classmethod
@@ -770,13 +775,13 @@ class AffinityMapSample(SemanticSample):
             **kwargs,
             ):
         label = load_chunk_or_volume(label_path, **kwargs)
-        # print(f'label path: {label_path} with size {label.shape}')
+        logger.debug(f'label path: {label_path} with size {label.shape}')
 
         inputs = []
         for image_path in image_paths:
             image = load_chunk_or_volume(image_path, **kwargs)
             inputs.append(image)
-            # print(f'image path: {image_path} with size {image.shape}')
+            logger.debug(f'image path: {image_path} with size {image.shape}')
         return cls(inputs, label, output_patch_size, num_classes=num_classes)
     
     @classmethod
@@ -884,7 +889,7 @@ class SelfSupervisedSample(SampleWithMask):
         """
         assert len(image_paths) == 1
         image = load_chunk_or_volume(image_paths[0], **kwargs)
-            # print(f'image path: {image_path} with size {image.shape}')
+        logger.debug(f'image path: {image_path} with size {image.shape}')
         return cls([image], image, output_patch_size)
 
     @cached_property
