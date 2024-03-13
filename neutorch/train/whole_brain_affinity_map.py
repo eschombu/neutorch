@@ -4,6 +4,7 @@ import traceback
 from functools import cached_property
 
 import click
+import torch.multiprocessing
 from yacs.config import CfgNode
 
 from neutorch.data.dataset import AffinityMapVolumeWithMask, load_cfg
@@ -41,6 +42,7 @@ def main(config_file: str, pdb_debug: bool):
             cfg.system.cpus = 0
             # cfg.system.gpus = 0
             cfg.freeze()
+        torch.multiprocessing.set_start_method('spawn')
         trainer = WholeBrainAffinityMapTrainer(cfg)
         trainer()
     except (KeyboardInterrupt, pdb.bdb.BdbQuit):

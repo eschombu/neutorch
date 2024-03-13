@@ -91,8 +91,7 @@ class TrainerBase(ABC):
                     model,
                     device_ids=list(range(gpu_num)),
                 )
-            else:
-                model.cuda()
+            model.cuda()
         # note that we have to wrap the nn.DataParallel(model) before 
         # loading the model since the dictionary is changed after the wrapping 
         model = load_chkpt(
@@ -130,10 +129,9 @@ class TrainerBase(ABC):
         training_data_loader = DataLoader(
             self.training_dataset,
             num_workers=self.cfg.system.cpus,
-            # num_workers=0,
             prefetch_factor=(2 if self.cfg.system.cpus > 0 else None),
             drop_last=False,
-            # multiprocessing_context='spawn',
+            multiprocessing_context='spawn',
             collate_fn=collate_batch,
             worker_init_fn=worker_init_fn,
             batch_size=self.batch_size,
@@ -147,7 +145,7 @@ class TrainerBase(ABC):
             num_workers=self.cfg.system.cpus,
             prefetch_factor=(2 if self.cfg.system.cpus > 0 else None),
             drop_last=False,
-            # multiprocessing_context='spawn',
+            multiprocessing_context='spawn',
             collate_fn=collate_batch,
             batch_size=self.batch_size,
         )
