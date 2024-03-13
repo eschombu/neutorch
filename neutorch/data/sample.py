@@ -18,9 +18,12 @@ from chunkflow.volume import PrecomputedVolume, AbstractVolume
 from neutorch.data.patch import Patch
 # from .patch_bounding_box_generator import PatchBoundingBoxGeneratorInChunk, PatchBoundingBoxGeneratorInsideMask
 from neutorch.data.transform import *
+from neutorch.utils.log_utils import get_logger
 
 DEFAULT_PATCH_SIZE = Cartesian(128, 128, 128)
 DEFAULT_NUM_CLASSES = 1
+
+logger = get_logger()
 
 
 class AbstractSample(ABC):
@@ -207,9 +210,9 @@ class Sample(AbstractSample):
         label_patch = self.label.cutout(bbox)
         
         if image_patch.shape[-3:] != self.patch_size_before_transform.tuple:
-            print(f'center: {center}, start: {start}, bbox: {bbox}')
+            logger.info(f'center: {center}, start: {start}, bbox: {bbox}')
             breakpoint()
-        # print(f'start: {(bz, by, bx)}, patch size: {self.output_patch_size}')
+        # logger.debug(f'start: {(bz, by, bx)}, patch size: {self.output_patch_size}')
         assert image_patch.shape[-1] == image_patch.shape[-2], f'image patch shape: {image_patch.shape}'
         assert image_patch.shape[-3:] == self.patch_size_before_transform.tuple, \
             f'image patch shape: {image_patch.shape}, patch size before transform: {self.patch_size_before_transform}'
@@ -223,10 +226,10 @@ class Sample(AbstractSample):
     def random_patch(self):
         patch = self.patch_from_center(self.random_patch_center)
 
-        # print(f'transforms: {self.transform}') 
-        # print(f'patch size before transform: {patch.shape}')
+        logger.debug(f'transforms: {self.transform}')
+        logger.debug(f'patch size before transform: {patch.shape}')
         self.transform(patch)
-        # print(f'patch size after transform: {patch.shape}')
+        logger.debug(f'patch size after transform: {patch.shape}')
         # breakpoint()
         assert patch.shape[-3:] == self.output_patch_size, \
             f'get patch shape: {patch.shape}, expected patch size {self.output_patch_size}'
@@ -311,7 +314,7 @@ class SampleWithMask(Sample):
     @cached_property
     def nonzero_block_bounding_boxes(self) -> BoundingBoxes:
         if self.nonzero_bounding_boxes_path and os.path.exists(self.nonzero_bounding_boxes_path):
-            print(f'loading existing nonzero bounding boxes file: {self.nonzero_bounding_boxes_path}')
+            logger.info(f'loading existing nonzero bounding boxes file: {self.nonzero_bounding_boxes_path}')
             bboxes = BoundingBoxes.from_file(self.nonzero_bounding_boxes_path)
         else:
             bboxes = self.mask.get_nonzero_block_bounding_boxes_with_different_voxel_size(
@@ -505,13 +508,13 @@ class SemanticSample(Sample):
             **kwargs,
             ):
         label = load_chunk_or_volume(label_path, **kwargs)
-        # print(f'label path: {label_path} with size {label.shape}')
+        logger.debug(f'label path: {label_path} with size {label.shape}')
 
         images = []
         for image_path in image_paths:
             image = load_chunk_or_volume(image_path, **kwargs)
             images.append(image)
-            # print(f'image path: {image_path} with size {image.shape}')
+            logger.debug(f'image path: {image_path} with size {image.shape}')
         return cls(images, label, output_patch_size, num_classes=num_classes)
 
     @classmethod
@@ -635,13 +638,13 @@ class AffinityMapSample(SemanticSample):
             **kwargs,
             ):
         label = load_chunk_or_volume(label_path, **kwargs)
-        # print(f'label path: {label_path} with size {label.shape}')
+        logger.debug(f'label path: {label_path} with size {label.shape}')
 
         images = []
         for image_path in image_paths:
             image = load_chunk_or_volume(image_path, **kwargs)
             images.append(image)
-            # print(f'image path: {image_path} with size {image.shape}')
+            logger.debug(f'image path: {image_path} with size {image.shape}')
         return cls(images, label, output_patch_size, num_classes=num_classes)
     
     @classmethod
@@ -735,7 +738,7 @@ class SelfSupervisedSample(Sample):
         """
         assert len(image_paths) == 1
         image = load_chunk_or_volume(image_paths[0], **kwargs)
-            # print(f'image path: {image_path} with size {image.shape}')
+        logger.debug(f'image path: {image_path} with size {image.shape}')
         return cls([image], image, output_patch_size)
 
     @cached_property

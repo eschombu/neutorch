@@ -1,3 +1,4 @@
+import logging
 import pdb
 import sys
 import traceback
@@ -8,8 +9,8 @@ import torch.multiprocessing
 from yacs.config import CfgNode
 
 from neutorch.data.dataset import AffinityMapVolumeWithMask, load_cfg
-
-from .base import TrainerBase
+from neutorch.train.base import TrainerBase
+from neutorch.utils import log_utils
 
 
 class WholeBrainAffinityMapTrainer(TrainerBase):
@@ -34,7 +35,8 @@ class WholeBrainAffinityMapTrainer(TrainerBase):
     help='configuration file containing all the parameters.'
 )
 @click.option('--pdb/--no-pdb', 'pdb_debug', default=False, help='Enable pdb upon exception.')
-def main(config_file: str, pdb_debug: bool):
+@click.option('--debug/--no-debug', default=False, help='Set log level to DEBUG upon exception.')
+def main(config_file: str, pdb_debug: bool, debug: bool):
     try:
         cfg = load_cfg(config_file)
         if pdb_debug:
@@ -42,7 +44,13 @@ def main(config_file: str, pdb_debug: bool):
             cfg.system.cpus = 0
             # cfg.system.gpus = 0
             cfg.freeze()
-        torch.multiprocessing.set_start_method('spawn')
+            log_utils.set_level(logging.DEBUG)
+        else:
+            if debug:
+                log_utils.set_level(logging.DEBUG)
+            else:
+                log_utils.set_level(logging.INFO)
+            torch.multiprocessing.set_start_method('spawn')
         trainer = WholeBrainAffinityMapTrainer(cfg)
         trainer()
     except (KeyboardInterrupt, pdb.bdb.BdbQuit):
