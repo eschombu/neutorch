@@ -12,12 +12,14 @@ from neutorch.data.transform import *
 
 DEFAULT_PATCH_SIZE = Cartesian(128, 128, 128)
 
+
 def load_cfg(cfg_file: str, freeze: bool = True):
     with open(cfg_file) as file:
         cfg = CfgNode.load_cfg(file)
     if freeze:
         cfg.freeze()
     return cfg
+
 
 def worker_init_fn(worker_id: int):
     worker_info = torch.utils.data.get_worker_info()
@@ -34,10 +36,12 @@ def worker_init_fn(worker_id: int):
     dataset.start = overall_start + worker_id * per_worker
     dataset.end = min(dataset.start + per_worker, overall_end)
 
+
 def path_to_dataset_name(path: str, dataset_names: list):
     for dataset_name in dataset_names:
         if dataset_name in path:
             return dataset_name
+
 
 def to_tensor(arr, cuda=True):
     if isinstance(arr, np.ndarray):
