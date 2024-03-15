@@ -153,8 +153,7 @@ class SemanticDataset(DatasetBase):
                     **kwargs)
             samples.append(sample)
 
-        return cls( samples )
-
+        return cls(samples)
     
 
 class OrganelleDataset(SemanticDataset):
@@ -237,7 +236,12 @@ class AffinityMapVolumeWithMask(DatasetBase):
         super().__init__(samples, cuda)
     
     @classmethod
-    def from_config(cls, cfg: CfgNode, **kwargs):
+    def from_config(cls, cfg: CfgNode, is_train=True, **kwargs):
+        if is_train:
+            name2chunks = cfg.dataset.training
+        else:
+            name2chunks = cfg.dataset.validation
+
         output_patch_size = Cartesian.from_collection(
             cfg.train.patch_size)
         
@@ -254,8 +258,8 @@ class AffinityMapVolumeWithMask(DatasetBase):
 
 
 class AffinityMapDataset(DatasetBase):
-    def __init__(self, samples: list):
-        super().__init__(samples)
+    def __init__(self, samples: list, cuda=True):
+        super().__init__(samples, cuda)
     
     @classmethod
     def from_config(cls, cfg: CfgNode, is_train: bool, **kwargs):

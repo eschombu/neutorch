@@ -14,7 +14,6 @@ from chunkflow.volume import load_chunk_or_volume
 from chunkflow.lib.synapses import Synapses
 from chunkflow.volume import PrecomputedVolume, AbstractVolume
 
-
 from neutorch.data.patch import Patch
 # from .patch_bounding_box_generator import PatchBoundingBoxGeneratorInChunk, PatchBoundingBoxGeneratorInsideMask
 from neutorch.data.transform import *
@@ -121,8 +120,12 @@ class Sample(AbstractSample):
     def __init__(self, 
             images: List[Chunk | PrecomputedVolume],
             label: Chunk | PrecomputedVolume,
-            output_patch_size: Cartesian, 
-            forbidden_distance_to_boundary: tuple = None) -> None:
+            output_patch_size: Cartesian,
+            mask: Chunk | PrecomputedVolume = None,
+            forbidden_distance_to_boundary: tuple = None,
+            patches_in_block: int = 8,
+            nonzero_bounding_boxes_path: str = None,
+        ) -> None:
         """Image sample with ground truth annotations
 
         Args:
@@ -173,6 +176,37 @@ class Sample(AbstractSample):
         # for cs, cp in zip(self.center_start, self.center_stop):
         #     assert cp > cs, \
         #         f'center start: {self.center_start}, center stop: {self.center_stop}'
+
+        assert patches_in_block > 0
+        self.mask = mask
+        self.patch_number = 0
+        self.patches_in_block = patches_in_block
+        self.image_block = None
+        self.label_block = None
+        self.nonzero_bounding_boxes_path = nonzero_bounding_boxes_path
+
+    @classmethod
+    def from_config(cls, config: CfgNode,
+            output_patch_size: Cartesian,
+            **kwargs) -> Sample:
+        images = []
+        for image_path in config.images:
+            image_vol = PrecomputedVolume.from_cloudvolume_path(image_path)
+            images.append(image_vol)
+
+        label = PrecomputedVolume.from_cloudvolume_path(config.label)
+        if config.get('mask'):
+            mask = PrecomputedVolume.from_cloudvolume_path(config.mask)
+        else:
+            mask = None
+        opt_args = {
+            'forbidden_distance_to_boundary': config.get('forbidden_distance_to_boundary'),
+            'patches_in_block': config.get('patches_in_block'),
+            'nonzero_bounding_boxes_path': config.get('nonzero_bounding_boxes_path'),
+        }
+        opt_args.update(kwargs)  # prioritize kwargs so they can override config file
+        opt_args = {k: v for k, v in opt_args.items() if v is not None}
+        return cls(images, label, output_patch_size, mask, **opt_args)
 
     # @classmethod
     # def from_json(cls, json_file: str, patch_size: Cartesian = DEFAULT_PATCH_SIZE):
@@ -246,66 +280,6 @@ class Sample(AbstractSample):
         #     weight /= 10.
 
         return weight
-    
-
-class SampleWithMask(Sample):
-    def __init__(self, 
-            images: List[PrecomputedVolume],
-            label: Union[Chunk, PrecomputedVolume],
-            output_patch_size: Cartesian,
-            mask: Chunk | PrecomputedVolume, 
-            forbidden_distance_to_boundary: tuple = None,
-            patches_in_block: int = 8,
-            nonzero_bounding_boxes_path: str = None,
-            ) -> None:
-        """Image sample with ground truth annotations
-
-        Args:
-            images (List[Chunk]): different versions of image chunks normalized to 0-1
-            label (np.ndarray): training label
-            output_patch_size (Cartesian): output patch size. this should be the patch_size before transform. 
-                the patch is expected to be shrinked to be the output patch size.
-            mask (Chunk | PrecomputedVolume): neuropil mask that indicates inside of neuropil.
-            forbidden_distance_to_boundary (Union[tuple, int]): 
-                the distance from patch center to sample boundary that is not allowed to sample 
-                the order is z,y,x,-z,-y,-x
-                if this is an integer, then all dimension is the same.
-                if this is a tuple of three integers, the positive and negative is the same
-                if this is a tuple of six integers, the positive and negative 
-                direction is defined separately. 
-            patches_in_block (int): sample a number of patches in a block.
-            nonzero_bounding_boxes_path (str): 
-        """
-        super().__init__(
-            images, label, output_patch_size=output_patch_size, 
-            forbidden_distance_to_boundary=forbidden_distance_to_boundary)
-        assert patches_in_block > 0
-        self.mask = mask
-        self.patch_number = 0
-        self.patches_in_block = patches_in_block
-        self.image_block = None
-        self.label_block = None
-        self.nonzero_bounding_boxes_path = nonzero_bounding_boxes_path
-
-    @classmethod
-    def from_config(cls, config: CfgNode, 
-            output_patch_size: Cartesian,
-            **kwargs) -> SampleWithMask:
-        images = []
-        for image_path in config.images:
-            image_vol = PrecomputedVolume.from_cloudvolume_path(image_path)
-            images.append(image_vol)
-        
-        label = PrecomputedVolume.from_cloudvolume_path(config.label)
-        mask = PrecomputedVolume.from_cloudvolume_path(config.mask)
-        opt_args = {
-            'forbidden_distance_to_boundary': config.get('forbidden_distance_to_boundary'),
-            'patches_in_block': config.get('patches_in_block'),
-            'nonzero_bounding_boxes_path': config.get('nonzero_bounding_boxes_path'),
-        }
-        opt_args.update(kwargs)  # prioritize kwargs so they can override config file
-        opt_args = {k: v for k, v in opt_args.items() if v is not None}
-        return cls(images, label, output_patch_size, mask, **opt_args)
 
     @cached_property
     def voxel_size_factors(self) -> Cartesian:
@@ -362,8 +336,11 @@ class SampleWithPointAnnotation(Sample):
     def __init__(self, 
             images: List[Chunk], 
             annotation_points: np.ndarray,
-            output_patch_size: Cartesian, 
-            forbidden_distance_to_boundary: tuple = None) -> None:
+            output_patch_size: Cartesian,
+            mask: Chunk | PrecomputedVolume = None,
+            forbidden_distance_to_boundary: tuple = None,
+            patches_in_block: int = 8,
+            nonzero_bounding_boxes_path: str = None) -> None:
         """Image sample with ground truth annotations
 
         Args:
@@ -379,9 +356,10 @@ class SampleWithPointAnnotation(Sample):
         label = np.zeros_like(images[0].array, dtype=np.float32)
         label = self._points_to_label(label)
         super().__init__(
-            images, label, 
-            output_patch_size = output_patch_size,
-            forbidden_distance_to_boundary=forbidden_distance_to_boundary
+            images, label, output_patch_size, mask,
+            forbidden_distance_to_boundary=forbidden_distance_to_boundary,
+            patches_in_block=patches_in_block,
+            nonzero_bounding_boxes_path=nonzero_bounding_boxes_path,
         )
 
     @property
@@ -491,31 +469,42 @@ class PostSynapseReference(AbstractSample):
 
 class SemanticSample(Sample):
     def __init__(self, 
-            images: List[Chunk | AbstractVolume ], 
-            label: Union[np.ndarray, Chunk], 
+            images: List[Chunk | PrecomputedVolume],
+            label: Chunk | PrecomputedVolume,
             output_patch_size: Cartesian,
             num_classes: int = DEFAULT_NUM_CLASSES,
-            forbidden_distance_to_boundary: tuple = None) -> None:
-        super().__init__(images, label, output_patch_size, forbidden_distance_to_boundary)
+            mask: Chunk | PrecomputedVolume = None,
+            forbidden_distance_to_boundary: tuple = None,
+            patches_in_block: int = 8,
+            nonzero_bounding_boxes_path: str = None) -> None:
+        super().__init__(images, label, output_patch_size, mask, forbidden_distance_to_boundary, patches_in_block,
+                         nonzero_bounding_boxes_path)
         # number of classes
         self.num_classes = num_classes
 
     @classmethod
     def from_explicit_path(cls, 
-            image_paths: list, label_path: str, 
+            image_paths: list,
+            label_path: str,
             output_patch_size: Cartesian,
-            num_classes: int=DEFAULT_NUM_CLASSES,
+            num_classes: int = DEFAULT_NUM_CLASSES,
+            mask_path: str = None,
             **kwargs,
             ):
         label = load_chunk_or_volume(label_path, **kwargs)
         logger.debug(f'label path: {label_path} with size {label.shape}')
+        if mask_path:
+            mask = load_chunk_or_volume(mask_path, **kwargs)
+            logger.debug(f'mask path: {mask_path} with size {mask.shape}')
+        else:
+            mask = None
 
         images = []
         for image_path in image_paths:
             image = load_chunk_or_volume(image_path, **kwargs)
             images.append(image)
             logger.debug(f'image path: {image_path} with size {image.shape}')
-        return cls(images, label, output_patch_size, num_classes=num_classes)
+        return cls(images, label, output_patch_size, num_classes=num_classes, mask=mask)
 
     @classmethod
     def from_label_path(cls, label_path: str, 
@@ -539,8 +528,9 @@ class SemanticSample(Sample):
             num_classes: int = DEFAULT_NUM_CLASSES):
         image_paths = d['images']
         label_path = d['label']
+        mask_path = d.get('mask')
         return cls.from_explicit_path(
-            image_paths, label_path, output_patch_size, num_classes=num_classes)
+            image_paths, label_path, output_patch_size, num_classes=num_classes, mask_path=mask_path)
 
     @cached_property
     def voxel_num(self):
@@ -578,13 +568,16 @@ class OrganelleSample(SemanticSample):
             images: List[Chunk], 
             label: Union[np.ndarray, Chunk], 
             output_patch_size: Cartesian, 
-            num_classes: int = DEFAULT_NUM_CLASSES, 
+            num_classes: int = DEFAULT_NUM_CLASSES,
+            mask: Chunk | PrecomputedVolume = None,
             forbidden_distance_to_boundary: tuple = None,
+            patches_in_block: int = 8,
+            nonzero_bounding_boxes_path: str = None,
             skip_classes: list = None,
             selected_classes: list = None) -> None:
-        super().__init__(images, label, output_patch_size, 
-            num_classes=num_classes, 
-            forbidden_distance_to_boundary=forbidden_distance_to_boundary)
+        super().__init__(images, label, output_patch_size, num_classes, mask,
+            forbidden_distance_to_boundary=forbidden_distance_to_boundary, patches_in_block=patches_in_block,
+            nonzero_bounding_boxes_path=nonzero_bounding_boxes_path)
 
         if skip_classes is not None:
             for class_idx in skip_classes:
@@ -592,43 +585,20 @@ class OrganelleSample(SemanticSample):
         
         if selected_classes is not None:
             self.label.array = np.isin(self.label.array, selected_classes)
-    
-    @cached_property
-    def transform(self):
-        return Compose([
-            NormalizeTo01(probability=1.),
-            # AdjustContrast(factor_range = (0.95, 1.8)),
-            # AdjustBrightness(min_factor = 0.05, max_factor = 0.2),
-            AdjustContrast(),
-            AdjustBrightness(),
-            Gamma(),
-            OneOf([
-                Noise(),
-                GaussianBlur2D(),
-            ]),
-            MaskBox(),
-            # Perspective2D(),
-            # RotateScale(probability=1.),
-            DropSection(probability=1.),
-            Flip(),
-            Transpose(),
-            # MissAlignment(),
-        ])
 
 
 class AffinityMapSample(SemanticSample):
-    def __init__(self, 
-            images: List[Chunk], 
-            label: Union[np.ndarray, Chunk], 
-            output_patch_size: Cartesian, 
+    def __init__(self,
+            images: List[PrecomputedVolume],
+            label: Union[Chunk, PrecomputedVolume],
+            output_patch_size: Cartesian,
+            num_classes: int = 3,
+            mask: Chunk | PrecomputedVolume = None,
             forbidden_distance_to_boundary: tuple = None,
-            num_classes: int = 3) -> None:
-        super().__init__(
-            images, label, output_patch_size, 
-            num_classes=num_classes,
-            forbidden_distance_to_boundary = forbidden_distance_to_boundary, 
-        )
-        # number of classes
+            patches_in_block: int = 8,
+            nonzero_bounding_boxes_path: str = None) -> None:
+        super().__init__(images, label, output_patch_size, num_classes, mask, forbidden_distance_to_boundary,
+                         patches_in_block, nonzero_bounding_boxes_path)
     
     @classmethod
     def from_explicit_path(cls, 
@@ -679,43 +649,10 @@ class AffinityMapSample(SemanticSample):
         ])
 
 
-class AffinityMapSampleWithMask(SampleWithMask):
-    def __init__(self,
-            images: List[PrecomputedVolume],
-            label: Union[Chunk, PrecomputedVolume],
-            output_patch_size: Cartesian, mask: Chunk | PrecomputedVolume,
-            forbidden_distance_to_boundary: tuple = None,
-            patches_in_block: int = 8,
-            nonzero_bounding_boxes_path: str = None) -> None:
-        super().__init__(images, label, output_patch_size, mask, forbidden_distance_to_boundary, patches_in_block,
-                         nonzero_bounding_boxes_path)
-    
-    @cached_property
-    def transform(self):
-        return Compose([
-            NormalizeTo01(probability=1.),
-            AdjustBrightness(),
-            AdjustContrast(),
-            Gamma(),
-            OneOf([
-                Noise(),
-                GaussianBlur2D(),
-            ]),
-            MaskBox(),
-            # Perspective2D(),
-            # RotateScale(probability=1.),
-            # DropSection(),
-            Flip(),
-            Transpose(),
-            MissAlignment(),
-            Label2AffinityMap(probability=1.),
-        ])
-
-
 class SelfSupervisedSample(Sample):
     def __init__(self, 
-            images: List[Chunk], 
-            label: Union[np.ndarray, Chunk], 
+            images: List[Chunk | PrecomputedVolume],
+            label: Chunk | PrecomputedVolume,
             output_patch_size: Cartesian, 
             forbidden_distance_to_boundary: tuple = None) -> None:
         super().__init__(images, label, output_patch_size, forbidden_distance_to_boundary)
@@ -737,7 +674,8 @@ class SelfSupervisedSample(Sample):
             _type_: _description_
         """
         assert len(image_paths) == 1
-        image = load_chunk_or_volume(image_paths[0], **kwargs)
+        image_path = image_paths[0]
+        image = load_chunk_or_volume(image_path, **kwargs)
         logger.debug(f'image path: {image_path} with size {image.shape}')
         return cls([image], image, output_patch_size)
 
