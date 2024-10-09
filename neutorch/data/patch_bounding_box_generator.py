@@ -1,13 +1,38 @@
 from random import randrange, choice
 from abc import ABC, abstractproperty
 from functools import cached_property
-from typing import List
+from typing import Iterator, List, Union
 
 import numpy as np
 
 from chunkflow.chunk import Chunk
 from chunkflow.lib.cartesian_coordinate import Cartesian, BoundingBox
 from chunkflow.volume import AbstractVolume
+
+
+def generate_patch_bounding_boxes(
+        volume_bbox: BoundingBox,
+        patch_size: Cartesian,
+        overlap: tuple = (0, 0, 0),
+        forbidden_distance_to_boundary: Union[int, tuple] = (0, 0, 0),
+) -> Iterator[BoundingBox]:
+
+    if not isinstance(patch_size, Cartesian):
+        patch_size = Cartesian.from_collection(patch_size)
+    if not isinstance(overlap, Cartesian):
+        overlap = Cartesian.from_collection(overlap)
+    if isinstance(forbidden_distance_to_boundary, int):
+        forbidden_distance_to_boundary = (forbidden_distance_to_boundary,) * 3
+    assert len(forbidden_distance_to_boundary) == 3 or len(forbidden_distance_to_boundary) == 6
+
+    start = volume_bbox.start + forbidden_distance_to_boundary[:3]
+    stop = volume_bbox.stop - forbidden_distance_to_boundary[-3:]
+    stride = patch_size - overlap
+
+    for z in range(start.z, stop.z - stride.z + 1, stride.z):
+        for y in range(start.y, stop.y - stride.y + 1, stride.y):
+            for x in range(start.x, stop.x - stride.x + 1, stride.x):
+                yield BoundingBox.from_delta(Cartesian(z, y, x), stride)
 
 
 class AbstractPatchBoundingBoxGenerator(ABC):
