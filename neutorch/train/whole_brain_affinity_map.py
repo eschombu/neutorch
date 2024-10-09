@@ -11,7 +11,7 @@ import torch
 import torch.distributed as dist
 from yacs.config import CfgNode
 
-from neutorch.data.dataset import AffinityMapVolumeWithMask, load_cfg
+from neutorch.data.dataset import AffinityMapDataset, load_cfg
 from neutorch.train.base import TrainerBase
 from neutorch.utils import log_utils
 
@@ -26,11 +26,21 @@ class WholeBrainAffinityMapTrainer(TrainerBase):
 
     @cached_property
     def training_dataset(self):
-        return AffinityMapVolumeWithMask.from_config(self.cfg, mode='training')
+        return AffinityMapDataset.from_config(self.cfg, is_train=True)
        
     @cached_property
     def validation_dataset(self):
-        return AffinityMapVolumeWithMask.from_config(self.cfg, mode='validation')
+        return AffinityMapDataset.from_config(self.cfg, is_train=False)
+
+
+def train(cfg):
+    trainer = WholeBrainAffinityMapTrainer(cfg)
+    trainer()
+
+
+def test(cfg):
+    trainer = WholeBrainAffinityMapTrainer(cfg)
+    trainer.test()
 
 
 @click.command()
@@ -39,13 +49,14 @@ class WholeBrainAffinityMapTrainer(TrainerBase):
     default='./config.yaml', 
     help='configuration file containing all the parameters.'
 )
+@click.option('--test-mode/--train-mode', default=False, help='Evaluate model on test dataset.')
 @click.option('--local-rank', '-r',
     type=click.INT, default=int(os.getenv('LOCAL_RANK', -1)),
     help='rank of local process. It is used to assign batches and GPU devices.'
 )
 @click.option('--pdb/--no-pdb', 'pdb_debug', default=False, help='Enable pdb upon exception.')
 @click.option('--debug/--no-debug', default=False, help='Set log level to DEBUG upon exception.')
-def main(config_file: str, local_rank: int, pdb_debug: bool, debug: bool):
+def main(config_file: str, test_mode: bool, local_rank: int, pdb_debug: bool, debug: bool):
     if local_rank != -1:
         dist.init_process_group(backend="nccl", init_method='env://')
         print(f'local rank of processes: {local_rank}')
@@ -66,8 +77,10 @@ def main(config_file: str, local_rank: int, pdb_debug: bool, debug: bool):
                 log_utils.set_level(logging.DEBUG)
             else:
                 log_utils.set_level(logging.INFO)
-        trainer = WholeBrainAffinityMapTrainer(cfg)
-        trainer()
+        if test_mode:
+            test(cfg)
+        else:
+            train(cfg)
     except (KeyboardInterrupt, pdb.bdb.BdbQuit):
         sys.exit(1)
     except Exception as e:
