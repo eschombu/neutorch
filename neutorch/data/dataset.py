@@ -11,7 +11,7 @@ from neutorch.data.sample import *
 from neutorch.data.transform import *
 
 DEFAULT_PATCH_SIZE = Cartesian(128, 128, 128)
-
+sample_classes = {name: c for name, c in locals().items() if isinstance(c, type) and issubclass(c, AbstractSample)}
 
 def load_cfg(cfg_file: str, freeze: bool = True):
     with open(cfg_file) as file:
@@ -60,6 +60,7 @@ class DatasetBase(torch.utils.data.IterableDataset):
     def __init__(self,
             samples: list,
             cuda=True,
+            test_mode=False,
         ):
         """
         Parameters:
@@ -68,6 +69,8 @@ class DatasetBase(torch.utils.data.IterableDataset):
         super().__init__()
         self.samples = samples
         self.cuda = cuda
+        self.test_mode = test_mode
+        self.current_index = None
 
     @cached_property
     def sample_num(self):
@@ -95,7 +98,7 @@ class DatasetBase(torch.utils.data.IterableDataset):
 
     @property
     def random_patch(self):
-         # only sample one subject, so replacement option could be ignored
+        # only sample one subject, so replacement option could be ignored
         sample_index = random.choices(
             range(0, self.sample_num),
             weights=self.sample_weights,
@@ -107,7 +110,11 @@ class DatasetBase(torch.utils.data.IterableDataset):
         return patch.image, patch.label
    
     def __next__(self):
-        image_chunk, label_chunk = self.random_patch
+        if self.test_mode:
+            if self.current_index is None:
+                self.current_index = (0, 0)
+        else:
+            image_chunk, label_chunk = self.random_patch
         image = to_tensor(image_chunk.array, self.cuda)
         label = to_tensor(label_chunk.array, self.cuda)
 
@@ -153,8 +160,7 @@ class SemanticDataset(DatasetBase):
                     **kwargs)
             samples.append(sample)
 
-        return cls( samples )
-
+        return cls(samples)
     
 
 class OrganelleDataset(SemanticDataset):
@@ -232,30 +238,9 @@ class OrganelleDataset(SemanticDataset):
         return image, target
 
 
-class AffinityMapVolumeWithMask(DatasetBase):
+class AffinityMapDataset(DatasetBase):
     def __init__(self, samples: list, cuda=True):
         super().__init__(samples, cuda)
-    
-    @classmethod
-    def from_config(cls, cfg: CfgNode, **kwargs):
-        output_patch_size = Cartesian.from_collection(
-            cfg.train.patch_size)
-        
-        samples = []
-        for sample_name in cfg.samples:
-            sample_cfg = cfg.samples[sample_name]
-            sample_class = eval(sample_cfg.type)
-            mask_filename = os.path.splitext(os.path.split(sample_cfg.mask.split('#')[0])[1])[0]
-            sample_nz_bbox_path = f'{sample_name}_{mask_filename}_nonzero_bboxes.npy'
-            sample = sample_class.from_config(
-                sample_cfg, output_patch_size, nonzero_bounding_boxes_path=sample_nz_bbox_path)
-            samples.append(sample)
-        return cls(samples, cuda=(cfg.system.gpus > 0))
-
-
-class AffinityMapDataset(DatasetBase):
-    def __init__(self, samples: list):
-        super().__init__(samples)
     
     @classmethod
     def from_config(cls, cfg: CfgNode, is_train: bool, **kwargs):
@@ -269,20 +254,36 @@ class AffinityMapDataset(DatasetBase):
             _type_: _description_
         """
         if is_train:
-            name2chunks = cfg.dataset.training
+            sample_names = cfg.dataset.training
         else:
-            name2chunks = cfg.dataset.validation
+            sample_names = cfg.dataset.validation
 
         samples = []
-        for name2path in name2chunks.values():
-            sample = AffinityMapSample.from_explicit_dict(
-                    name2path, 
+        for sample_name in sample_names:
+            sample_cfg = cfg.samples[sample_name]
+            if 'type' in sample_cfg:
+                if sample_cfg.type in sample_classes:
+                    sample_class = sample_classes[sample_cfg.type]
+                else:
+                    raise ValueError(f"Unrecognized Sample class: '{sample_cfg.type}'")
+            else:
+                sample_class = AffinityMapSample
+            if 'nonzero_bounding_boxes_path' in sample_cfg:
+                sample_nz_bbox_path = sample_cfg.nonzero_bounding_boxes_path
+            elif 'mask' in sample_cfg:
+                mask_filename = os.path.splitext(os.path.split(sample_cfg.mask.split('#')[0])[1])[0]
+                sample_nz_bbox_path = f'{sample_name}_{mask_filename}_nonzero_bboxes.npy'
+            else:
+                sample_nz_bbox_path = None
+            sample = sample_class.from_config(
+                    sample_cfg,
                     output_patch_size=cfg.train.patch_size,
                     num_classes=cfg.model.out_channels,
+                    nonzero_bounding_boxes_path=sample_nz_bbox_path,
                     **kwargs)
             samples.append(sample)
 
-        return cls( samples )
+        return cls(samples)
 
 
 class BoundaryAugmentationDataset(DatasetBase): 
@@ -307,7 +308,7 @@ class BoundaryAugmentationDataset(DatasetBase):
                     **kwargs)
             samples.append(sample)
 
-        return cls( samples )
+        return cls(samples)
 
     
 if __name__ == '__main__':
