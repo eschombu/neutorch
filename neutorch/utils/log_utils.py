@@ -1,6 +1,8 @@
 import logging
 import os
+import platform
 import sys
+from datetime import datetime
 from typing import Optional
 
 _neutorch_logger: Optional[logging.Logger] = None
@@ -17,11 +19,15 @@ _format_parts = [
 
 def _get_path() -> str:
     slurm_vars = ['SLURM_JOB_ID', 'SLURM_PROCID']
-    parts = ['neutorch']
+    global_parts = ['neutorch']
+    job_parts = []
     for var in slurm_vars:
         if os.environ.get(var):
-            parts.append(os.environ[var])
-    return '_'.join(parts) + '.log'
+            job_parts.append(os.environ[var])
+    if len(job_parts) == 0:
+        job_parts.append(platform.node())
+        job_parts.append(datetime.now().strftime('%Y%m%dT%H%M%S'))
+    return '_'.join(global_parts + job_parts) + '.log'
 
 
 def _get_formatter(fmt=(' - '.join(_format_parts))) -> logging.Formatter:
