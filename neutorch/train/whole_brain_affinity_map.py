@@ -8,7 +8,7 @@ import click
 import torch.multiprocessing
 from yacs.config import CfgNode
 
-from neutorch.data.dataset import AffinityMapVolumeWithMask, load_cfg
+from neutorch.data.dataset import AffinityMapDataset, load_cfg
 from neutorch.train.base import TrainerBase
 from neutorch.utils import log_utils
 
@@ -21,11 +21,21 @@ class WholeBrainAffinityMapTrainer(TrainerBase):
 
     @cached_property
     def training_dataset(self):
-        return AffinityMapVolumeWithMask.from_config(self.cfg, is_train=True)
+        return AffinityMapDataset.from_config(self.cfg, is_train=True)
        
     @cached_property
     def validation_dataset(self):
-        return AffinityMapVolumeWithMask.from_config(self.cfg, is_train=False)
+        return AffinityMapDataset.from_config(self.cfg, is_train=False)
+
+
+def train(cfg):
+    trainer = WholeBrainAffinityMapTrainer(cfg)
+    trainer()
+
+
+def test(cfg):
+    trainer = WholeBrainAffinityMapTrainer(cfg)
+    trainer.test()
 
 
 @click.command()
@@ -34,9 +44,10 @@ class WholeBrainAffinityMapTrainer(TrainerBase):
     default='./config.yaml', 
     help='configuration file containing all the parameters.'
 )
+@click.option('--test-mode/--train-mode', default=False, help='Evaluate model on test dataset.')
 @click.option('--pdb/--no-pdb', 'pdb_debug', default=False, help='Enable pdb upon exception.')
-@click.option('--debug/--no-debug', default=False, help='Set log level to DEBUG upon exception.')
-def main(config_file: str, pdb_debug: bool, debug: bool):
+@click.option('--debug/--no-debug', default=False, help='Set log level to DEBUG.')
+def main(config_file: str, test_mode: bool, pdb_debug: bool, debug: bool):
     try:
         cfg = load_cfg(config_file)
         if pdb_debug:
@@ -51,8 +62,10 @@ def main(config_file: str, pdb_debug: bool, debug: bool):
             else:
                 log_utils.set_level(logging.INFO)
             torch.multiprocessing.set_start_method('spawn')
-        trainer = WholeBrainAffinityMapTrainer(cfg)
-        trainer()
+        if test_mode:
+            test(cfg)
+        else:
+            train(cfg)
     except (KeyboardInterrupt, pdb.bdb.BdbQuit):
         sys.exit(1)
     except Exception as e:

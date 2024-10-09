@@ -112,7 +112,6 @@ class TrainerBase(ABC):
             lr=self.cfg.train.learning_rate
         )
 
-
     @cached_property
     def loss_module(self):
         return BinomialCrossEntropyWithLogits()
@@ -126,6 +125,10 @@ class TrainerBase(ABC):
     @abstractproperty
     def validation_dataset(self):
         pass
+
+    @cached_property
+    def test_dataset(self):
+        return None
         
     @cached_property
     def training_data_loader(self):
@@ -134,7 +137,7 @@ class TrainerBase(ABC):
             num_workers=self.cfg.system.cpus,
             prefetch_factor=(2 if self.cfg.system.cpus > 0 else None),
             drop_last=False,
-            multiprocessing_context='spawn',
+            multiprocessing_context=('spawn' if self.cfg.system.cpus > 0 else None),
             collate_fn=collate_batch,
             worker_init_fn=worker_init_fn,
             batch_size=self.batch_size,
@@ -148,11 +151,24 @@ class TrainerBase(ABC):
             num_workers=self.cfg.system.cpus,
             prefetch_factor=(2 if self.cfg.system.cpus > 0 else None),
             drop_last=False,
-            multiprocessing_context='spawn',
+            multiprocessing_context=('spawn' if self.cfg.system.cpus > 0 else None),
             collate_fn=collate_batch,
             batch_size=self.batch_size,
         )
         return validation_data_loader
+
+    @cached_property
+    def test_data_loader(self):
+        test_data_loader = DataLoader(
+            self.test_dataset if self.test_dataset is not None else self.validation_dataset,
+            num_workers=self.cfg.system.cpus,
+            prefetch_factor=(2 if self.cfg.system.cpus > 0 else None),
+            drop_last=False,
+            multiprocessing_context=('spawn' if self.cfg.system.cpus > 0 else None),
+            collate_fn=collate_batch,
+            batch_size=self.batch_size,
+        )
+        return test_data_loader
 
     @cached_property
     def validation_data_iter(self):
@@ -230,3 +246,22 @@ class TrainerBase(ABC):
                     log_tensor(writer, 'evaluate/target', validation_target, 'image', iter_idx)
 
         writer.close()
+
+    def test(self):
+        writer = SummaryWriter(log_dir=self.cfg.train.output_dir)
+        accumulated_loss = 0.
+        for iter_idx, (image, label) in enumerate(self.test_data_loader):
+            with torch.no_grad():
+                prediction = self.model(image)
+                target = self.label_to_target(label)
+                loss = self.loss_module(prediction, target)
+                accumulated_loss += loss.tolist()
+                prediction = self.post_processing(prediction)
+                per_voxel_loss = accumulated_loss / (iter_idx + 1) / self.voxel_num
+                logger.debug(f'iter {iter_idx}: test loss = {round(per_voxel_loss, 3)}')
+                writer.add_scalar('Loss/test', per_voxel_loss, iter_idx)
+                log_tensor(writer, 'evaluate/image', image, 'image', iter_idx)
+                log_tensor(writer, 'evaluate/prediction', prediction, 'image', iter_idx)
+                log_tensor(writer, 'evaluate/target', target, 'image', iter_idx)
+
+        logger.info(f'Testing complete: loss = {round(per_voxel_loss, 3)}')
