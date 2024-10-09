@@ -11,6 +11,8 @@ from neutorch.data.sample import *
 from neutorch.data.transform import *
 
 DEFAULT_PATCH_SIZE = Cartesian(128, 128, 128)
+sample_classes = {name: c for name, c in locals().items() if isinstance(c, type) and issubclass(c, AbstractSample)}
+
 
 def get_iter_range(sample_num: int) -> tuple[int, int]:
     # multiprocess data loading 
@@ -30,6 +32,7 @@ def get_iter_range(sample_num: int) -> tuple[int, int]:
             iter_stop = iter_start + 1
     
     return iter_start, iter_stop
+
 
 def load_cfg(cfg_file: str, freeze: bool = True):
     with open(cfg_file) as file:
@@ -78,6 +81,7 @@ class DatasetBase(torch.utils.data.Dataset):
     def __init__(self,
             samples: List[AbstractSample],
             cuda=True,
+            test_mode=False,
         ):
         """
         Parameters:
@@ -88,6 +92,8 @@ class DatasetBase(torch.utils.data.Dataset):
         assert len(samples) > 0
         self.samples = samples
         self.cuda = cuda
+        self.test_mode = test_mode
+        self.current_index = None
 
     @classmethod
     def from_config_v5(cls, 
@@ -148,7 +154,7 @@ class DatasetBase(torch.utils.data.Dataset):
 
     @property
     def random_patch(self):
-         # only sample one subject, so replacement option could be ignored
+        # only sample one subject, so replacement option could be ignored
         sample_index = random.choices(
             range(0, self.sample_num),
             weights=self.sample_weights,
@@ -168,7 +174,11 @@ class DatasetBase(torch.utils.data.Dataset):
         return patch_num
 
     def __next__(self):
-        image_chunk, label_chunk = self.random_patch
+        if self.test_mode:
+            if self.current_index is None:
+                self.current_index = (0, 0)
+        else:
+            image_chunk, label_chunk = self.random_patch
         image = to_tensor(image_chunk.array, self.cuda)
         label = to_tensor(label_chunk.array, self.cuda)
 
@@ -217,14 +227,14 @@ class SemanticDataset(DatasetBase):
                     **kwargs)
             samples.append(sample)
 
-        return cls( samples )
+        return cls(samples)
 
     def label_to_target(self, label_chunk: Chunk) -> Chunk:
         target_chunk = (label_chunk>0).astype(np.float32)
         assert isinstance(target_chunk, Chunk)
         # label = (label > 0).to(torch.float32)
         return target_chunk
-    
+
 
 class OrganelleDataset(SemanticDataset):
     def __init__(self, samples: List[AbstractSample], 
@@ -296,83 +306,38 @@ class OrganelleDataset(SemanticDataset):
 
         return image, target
 
-class VolumeWithMask(DatasetBase):
-    @classmethod
-    def from_config(cls, cfg: CfgNode, mode: str = 'training', **kwargs):
-        """construct volume with mask dataset
-
-        Args:
-            cfg (CfgNode): the configuration node
-            mode (str, optional): ['training', 'validation', 'test']. Defaults to 'train'.
-        """
-        output_patch_size = Cartesian.from_collection(
-            cfg.train.patch_size)
-        
-        sample_names = cfg.dataset[mode]
-
-        iter_start, iter_stop = get_iter_range(len(sample_names))
-
-        samples = []
-        for sample_name in sample_names[iter_start : iter_stop]:
-            sample_cfg = cfg.samples[sample_name]
-            sample_class = eval(sample_cfg.type)
-            mask_filename = os.path.splitext(os.path.split(sample_cfg.mask.split('#')[0])[1])[0]
-            sample_nz_bbox_path = f'{sample_name}_{mask_filename}_nonzero_bboxes.npy'
-            sample = sample_class.from_config(
-                sample_cfg, output_patch_size, nonzero_bounding_boxes_path=sample_nz_bbox_path)
-            samples.append(sample)
-        return cls(samples, cuda=(cfg.system.gpus > 0))
-
-    def __len__(self):
-        # num = 0
-        # for sample in self.samples:
-        #     num += sample.
-        # return num
-        # return self.sample_num * cfg.system.gpus * cfg.train.batch_size * 16
-        # our patches are randomly sampled from chunk or volume and is close to unlimited.
-        # return a big enough number to make distributed sampler work
-        return 10240
-        # return int(1e10)
-        # return 10
-
 
 class AffinityMapDataset(DatasetBase):
-    def __init__(self, samples: list):
-        super().__init__(samples)
+    def __init__(self, samples: list, cuda=True):
+        super().__init__(samples, cuda)
     
     @classmethod
-    def from_config(cls, cfg: CfgNode, mode: str, **kwargs):
-        """Construct a semantic dataset with chunk or volume
-
-        Args:
-            cfg (CfgNode): configuration in YAML file 
-            mode (str): training mode or validation mode.
-        """
+    def from_config(cls, cfg: CfgNode, is_train: bool, **kwargs):
         output_patch_size = Cartesian.from_collection(cfg.train.patch_size)
-        sample_names = cfg.dataset[mode]
-
-        sample_configs = CfgNode()
-        for sample_config_path in cfg.samples:
-            sample_cfg_node = load_cfg(sample_config_path, freeze=False)
-            sample_config_dir = os.path.dirname(sample_config_path)
-            for sample_node in sample_cfg_node.values():
-                sample_node.dir = os.path.join(sample_config_dir, sample_node.dir)
-
-            sample_configs.update(sample_cfg_node)
-
-        sample_num = len(sample_names)
-        iter_start, iter_stop = get_iter_range(sample_num)
+        if is_train:
+            sample_names = cfg.dataset.training
+        else:
+            sample_names = cfg.dataset.validation
 
         samples = []
-        for sample_name in sample_names[iter_start : iter_stop]:
-            sample_node = sample_configs[sample_name]
-            sample = AffinityMapSample.from_config_node(
-                sample_node, output_patch_size,
+        for sample_name in sample_names:
+            sample_cfg = cfg.samples[sample_name]
+            if 'type' in sample_cfg:
+                if sample_cfg.type in sample_classes:
+                    sample_class = sample_classes[sample_cfg.type]
+                else:
+                    raise ValueError(f"Unrecognized Sample class: '{sample_cfg.type}'")
+            else:
+                sample_class = AffinityMapSample
+            sample = sample_class.from_config(
+                sample_cfg,
+                output_patch_size=output_patch_size,
                 num_classes=cfg.model.out_channels,
+                **kwargs,
             )
             samples.append(sample)
 
-        return cls( samples )
+        return cls(samples)
 
 
 class BoundaryAugmentationDataset(DatasetBase): 
@@ -397,7 +362,7 @@ class BoundaryAugmentationDataset(DatasetBase):
                     **kwargs)
             samples.append(sample)
 
-        return cls( samples )
+        return cls(samples)
 
     
 if __name__ == '__main__':
@@ -416,7 +381,7 @@ if __name__ == '__main__':
     from neutorch.train.base import setup
     setup()
 
-    training_dataset = VolumeWithMask.from_config(cfg, mode='training')
+    training_dataset = AffinityMapDataset.from_config(cfg, mode='training')
 
 
     sampler = torch.utils.data.distributed.DistributedSampler(
