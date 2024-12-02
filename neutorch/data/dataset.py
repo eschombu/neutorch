@@ -57,11 +57,7 @@ def to_tensor(arr, cuda=True):
 
 
 class DatasetBase(torch.utils.data.IterableDataset):
-    def __init__(self,
-            samples: list,
-            cuda=True,
-            test_mode=False,
-        ):
+    def __init__(self, samples: list, cuda=True):
         """
         Parameters:
             patch_size (int or tuple): the patch size we are going to provide.
@@ -69,8 +65,6 @@ class DatasetBase(torch.utils.data.IterableDataset):
         super().__init__()
         self.samples = samples
         self.cuda = cuda
-        self.test_mode = test_mode
-        self.current_index = None
 
     @cached_property
     def sample_num(self):
@@ -110,14 +104,9 @@ class DatasetBase(torch.utils.data.IterableDataset):
         return patch.image, patch.label
    
     def __next__(self):
-        if self.test_mode:
-            if self.current_index is None:
-                self.current_index = (0, 0)
-        else:
-            image_chunk, label_chunk = self.random_patch
+        image_chunk, label_chunk = self.random_patch
         image = to_tensor(image_chunk.array, self.cuda)
         label = to_tensor(label_chunk.array, self.cuda)
-
         return image, label
 
     def __iter__(self):
