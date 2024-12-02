@@ -57,14 +57,7 @@ def to_tensor(arr, cuda=True):
 
 
 class DatasetBase(torch.utils.data.IterableDataset):
-    def __init__(self,
-            samples: list,
-            cuda=True,
-        ):
-        """
-        Parameters:
-            patch_size (int or tuple): the patch size we are going to provide.
-        """
+    def __init__(self, samples: list, cuda=True):
         super().__init__()
         self.samples = samples
         self.cuda = cuda
@@ -122,23 +115,8 @@ class DatasetBase(torch.utils.data.IterableDataset):
         while True:
             yield next(self)
 
-
-class SemanticDataset(DatasetBase):
-    def __init__(self, samples: list):
-            #patch_size: Cartesian = DEFAULT_PATCH_SIZE):
-        super().__init__(samples)
-    
     @classmethod
-    def from_config(cls, cfg: CfgNode, is_train: bool, **kwargs):
-        """Construct a semantic dataset with chunk or volume
-
-        Args:
-            cfg (CfgNode): _description_
-            is_train (bool): _description_
-
-        Returns:
-            _type_: _description_
-        """
+    def _from_config_using_sampler(cls, cfg: CfgNode, is_train: bool, sampler_class, **kwargs):
         if is_train:
             name2chunks = cfg.dataset.training
         else:
@@ -146,14 +124,28 @@ class SemanticDataset(DatasetBase):
 
         samples = []
         for name2path in name2chunks.values():
-            sample = SemanticSample.from_explicit_dict(
-                    name2path, 
+            samples.append(
+                sampler_class.from_explicit_dict(
+                    name2path,
                     output_patch_size=cfg.train.patch_size,
                     num_classes=cfg.model.out_channels,
-                    **kwargs)
-            samples.append(sample)
+                    **kwargs
+                )
+            )
 
-        return cls(samples)
+        return cls(samples, cuda=(cfg.system.gpus > 0))
+
+
+class SemanticDataset(DatasetBase):
+    @classmethod
+    def from_config(cls, cfg: CfgNode, is_train: bool, **kwargs):
+        return cls._from_config_using_sampler(cfg, is_train, SemanticSample, **kwargs)
+
+
+class AffinityMapDataset(DatasetBase):
+    @classmethod
+    def from_config(cls, cfg: CfgNode, is_train: bool, **kwargs):
+        return cls._from_config_using_sampler(cfg, is_train, AffinityMapSample, **kwargs)
     
 
 class OrganelleDataset(SemanticDataset):
@@ -232,9 +224,6 @@ class OrganelleDataset(SemanticDataset):
 
 
 class AffinityMapVolumeWithMask(DatasetBase):
-    def __init__(self, samples: list, cuda=True):
-        super().__init__(samples, cuda)
-    
     @classmethod
     def from_config(cls, cfg: CfgNode, is_train=True, **kwargs):
         if is_train:
@@ -257,36 +246,8 @@ class AffinityMapVolumeWithMask(DatasetBase):
         return cls(samples, cuda=(cfg.system.gpus > 0))
 
 
-class AffinityMapDataset(DatasetBase):
-    def __init__(self, samples: list, cuda=True):
-        super().__init__(samples, cuda)
-    
-    @classmethod
-    def from_config(cls, cfg: CfgNode, is_train: bool, **kwargs):
-        """Construct a semantic dataset with chunk or volume
-
-        Args:
-            cfg (CfgNode): _description_
-            is_train (bool): _description_
-
-        Returns:
-            _type_: _description_
-        """
-        if is_train:
-            name2chunks = cfg.dataset.training
-        else:
-            name2chunks = cfg.dataset.validation
-
-        samples = []
-        for name2path in name2chunks.values():
-            sample = AffinityMapSample.from_explicit_dict(
-                    name2path, 
-                    output_patch_size=cfg.train.patch_size,
-                    num_classes=cfg.model.out_channels,
-                    **kwargs)
-            samples.append(sample)
-
-        return cls( samples )
+class AffinityLsdMapVolumeWithMask(DatasetBase):
+    pass
 
 
 class BoundaryAugmentationDataset(DatasetBase): 
