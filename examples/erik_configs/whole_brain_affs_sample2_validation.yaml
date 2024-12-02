@@ -1,0 +1,55 @@
+system:
+  cpus: 12
+  gpus: 4
+  seed: 1
+
+# Each file specified in the images list is a variant of the same volume; useful for data augmentation or training
+#   over images with different characteristics and quality
+samples:
+  brain3:
+    type: "AffinityMapSample"
+    images: [
+      "precomputed://file:///mnt/ceph/users/neuro/wasp_em/jwu/sample3/05_yuri_v3#preload=False",
+      "precomputed://file:///mnt/ceph/users/neuro/wasp_em/jwu/sample3/07_yuri_v5#preload=False",
+      "precomputed://file:///mnt/ceph/users/neuro/wasp_em/jwu/sample3/04_clahe#preload=False"
+    ]
+    label: "precomputed://file:///mnt/ceph/users/neuro/wasp_em/jwu/sample3/24_segment_v2/02_proofread_seg#preload=False"
+    mask: "precomputed://file:///mnt/ceph/users/neuro/wasp_em/jwu/sample3/20_segmentation_mask#preload=True;cache='/tmp/';mip=3"
+  brain2:
+    type: "AffinityMapSample"
+    images: [
+      "precomputed://file:///mnt/ceph/users/neuro/wasp_em/jwu/sample2/07_yuri_v2#preload=False",
+    ]
+    label: "precomputed://file:///mnt/ceph/users/neuro/wasp_em/jwu/sample2/20_seg#preload=False"
+    mask: "precomputed://file:///mnt/ceph/users/neuro/wasp_em/jwu/sample2/10_segmentation_mask#preload=True;cache='/tmp/';mip=3"
+  vol_04831:
+    type: "AffinityMapSample"
+    images: [
+      "/mnt/ceph/neuro/wasp_em/eschomburg/sample2/vol_04831/img_zyx_4931-5131_7467-7667_4272-4472.h5",
+    ]
+    label: "/mnt/ceph/neuro/wasp_em/eschomburg/sample2/vol_04831/label_v5_filled.h5"
+
+dataset:
+  training: ["brain3", "brain2"]
+  validation: ["vol_04831"]
+#  testing: []
+
+model:
+  in_channels: 1
+  out_channels: 3
+
+train:
+  iter_start: 0
+  iter_stop: 400000
+  start_saving: 10000
+  class_rebalance: false
+  # batch size per GPU
+  # The dataprovider should provide nGPU*batch_size batches!
+  batch_size: 1
+  output_dir: "./"
+  patch_size: [128, 128, 128]
+  learning_rate: 0.001
+#  training_interval: 400
+#  validation_interval: 5000
+  training_interval: 10
+  validation_interval: 20
