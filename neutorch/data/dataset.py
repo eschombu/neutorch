@@ -77,12 +77,8 @@ def to_tensor(arr, cuda=False):
     return arr
 
 
-class DatasetBase(torch.utils.data.Dataset):
-    def __init__(self,
-            samples: List[AbstractSample],
-            cuda=True,
-            test_mode=False,
-        ):
+class DatasetBase(torch.utils.data.IterableDataset):
+    def __init__(self, samples: list, cuda=True):
         """
         Parameters:
             patch_size (int or tuple): the patch size we are going to provide.
@@ -92,8 +88,6 @@ class DatasetBase(torch.utils.data.Dataset):
         assert len(samples) > 0
         self.samples = samples
         self.cuda = cuda
-        self.test_mode = test_mode
-        self.current_index = None
 
     @classmethod
     def from_config_v5(cls, 
@@ -174,28 +168,16 @@ class DatasetBase(torch.utils.data.Dataset):
         return patch_num
 
     def __next__(self):
-        if self.test_mode:
-            if self.current_index is None:
-                self.current_index = (0, 0)
-        else:
-            image_chunk, label_chunk = self.random_patch
+        image_chunk, label_chunk = self.random_patch
         image = to_tensor(image_chunk.array, self.cuda)
         label = to_tensor(label_chunk.array, self.cuda)
+        assert image.ndim == 4
+        return image, label
 
     def __getitem__(self, index: int):
-        """return a random patch from a random sample
-        the exact index does not matter!
+        """return a random patch from a random sample, the index does not matter!"""
+        return next(self)
 
-        Args:
-            index (int): index of the patch
-        """
-        image_chunk, label_chunk = self.random_patch
-        target_chunk = self.label_to_target(label_chunk)
-        
-        image_tensor = to_tensor(image_chunk.array)
-        target_tensor = to_tensor(target_chunk.array)
-        assert image_tensor.ndim == 4
-        return image_tensor, target_tensor
 
 class SemanticDataset(DatasetBase):
     def __init__(self, samples: list):
