@@ -14,7 +14,7 @@ from yacs.config import CfgNode
 
 from neutorch.data.dataset import worker_init_fn
 from neutorch.data.patch import collate_batch
-from neutorch.loss import BinomialCrossEntropyWithLogits
+from neutorch.loss import AffinitiesAndLSDsLoss, AffinitiesLoss, LSDsLoss
 from neutorch.model.io import load_chkpt, log_tensor, save_chkpt
 from neutorch.model.IsoRSUNet import Model
 from neutorch.utils.log_utils import get_logger
@@ -114,7 +114,15 @@ class TrainerBase(ABC):
 
     @cached_property
     def loss_module(self):
-        return BinomialCrossEntropyWithLogits()
+        if self.cfg.train.task == 'affs':
+            return AffinitiesLoss()
+        elif self.cfg.train.task == 'lsds':
+            return LSDsLoss()
+        elif self.cfg.train.task == 'affs+lsds':
+            return AffinitiesAndLSDsLoss(
+                self.cfg.train.num_affinities,
+                self.cfg.train.lsds_to_affs_weight_ratio
+            )
 
     @cached_property
     @abstractproperty
