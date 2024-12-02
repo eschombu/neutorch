@@ -1,0 +1,47 @@
+system:
+  cpus: 12
+  gpus: 4
+  seed: 1
+ 
+samples:
+  brain3:
+    type: "AffinityMapSampleWithMask"
+    images: [
+      "precomputed://file:///mnt/ceph/users/neuro/wasp_em/jwu/sample3/05_yuri_v3#preload=False",
+      "precomputed://file:///mnt/ceph/users/neuro/wasp_em/jwu/sample3/07_yuri_v5#preload=False",
+      "precomputed://file:///mnt/ceph/users/neuro/wasp_em/jwu/sample3/04_clahe#preload=False"
+    ]
+    label: "precomputed://file:///mnt/ceph/users/neuro/wasp_em/jwu/sample3/24_segment_v2/02_proofread_seg#preload=False"
+    mask: "precomputed://file:///mnt/ceph/users/neuro/wasp_em/jwu/sample3/20_segmentation_mask#preload=True;cache='/tmp/';mip=3"
+  brain2:
+    type: "AffinityMapSampleWithMask"
+    images: [
+      "precomputed://file:///mnt/ceph/users/neuro/wasp_em/jwu/sample2/07_yuri_v2#preload=False",
+    ]
+    label: "precomputed://file:///mnt/ceph/users/neuro/wasp_em/jwu/sample2/20_seg#preload=False"
+    mask: "precomputed://file:///mnt/ceph/users/neuro/wasp_em/jwu/sample2/10_segmentation_mask#preload=True;cache='/tmp/';mip=3"
+
+# section unused
+dataset:
+  training: []
+  validation: []
+
+model:
+  in_channels: 1
+  out_channels: 3
+
+train:
+  iter_start: 0
+  iter_stop: 400000
+  start_saving: 10000
+  class_rebalance: false
+  # batch size per GPU
+  # The dataprovider should provide nGPU*batch_size batches!
+  batch_size: 1
+  output_dir: "./"
+  patch_size: [128, 128, 128]
+  learning_rate: 0.001
+  training_interval: 400
+  validation_interval: 5000
+#  training_interval: 10
+#  validation_interval: 20
