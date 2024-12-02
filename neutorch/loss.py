@@ -108,22 +108,45 @@ class FocalLoss(BinomialCrossEntropyWithLogits, AbstractLoss):
         return cost
 
 
-class MSELoss(AbstractLoss):
-    def __init__(self, rebalance: bool=False) -> None:
-        super().__init__(rebalance=rebalance)
-        self.loss_func = nn.MSELoss()
+class MSEMaskedLoss(nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.mse = nn.MSELoss(reduction="none")
 
     def forward(self, pred: torch.Tensor, target: torch.Tensor, mask: torch.Tensor=None):
-        loss = self.loss_func(pred, target)
+        loss = self.mse(pred, target)
 
-        if self.rebalance:
-            rebalance_weight = gunpowder_balance(target, mask=mask)
-            loss *= rebalance_weight
+        if mask is not None:
+            loss *= mask
 
-        cost = self._reduce_loss(loss, mask=mask)
+        cost = loss.sum()
         return cost
 
 
+class AffinitiesLoss(BinomialCrossEntropyWithLogits):
+    pass
+
+
+class LSDsLoss(MSEMaskedLoss):
+    pass
+
+
+class AffinitiesAndLSDsLoss(nn.Module):
+    def __init__(self, num_affinities: int, lsds_to_affs_weight_ratio: float):
+        super().__init__()
+        self.num_affinities = num_affinities
+        self.lsds_to_affs_weight_ratio = lsds_to_affs_weight_ratio
+        self.loss_modules = nn.ModuleDict({
+            'affs': AffinitiesLoss(),
+            'lsds': LSDsLoss()
+        })
+
+    def forward(self, prediction: torch.Tensor, target: torch.Tensor, mask: torch.Tensor=None):
+        aff_loss = self.loss_modules['affs'](
+            prediction[:, :self.num_affinities, ...], target[:, :self.num_affinities, ...], mask=mask)
+        lsd_loss = self.loss_modules['lsds'](
+            torch.sigmoid(prediction[:, self.num_affinities:, ...]), target[:, self.num_affinities:, ...], mask=mask)
+        return aff_loss + self.lsds_to_affs_weight_ratio * lsd_loss
 
 
 # TO-DO
