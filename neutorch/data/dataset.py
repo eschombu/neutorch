@@ -13,6 +13,7 @@ from neutorch.data.transform import *
 DEFAULT_PATCH_SIZE = Cartesian(128, 128, 128)
 sample_classes = {name: c for name, c in locals().items() if isinstance(c, type) and issubclass(c, AbstractSample)}
 
+
 def load_cfg(cfg_file: str, freeze: bool = True):
     with open(cfg_file) as file:
         cfg = CfgNode.load_cfg(file)
@@ -57,11 +58,9 @@ def to_tensor(arr, cuda=True):
 
 
 class DatasetBase(torch.utils.data.IterableDataset):
+    default_sample_class = None
+
     def __init__(self, samples: list, cuda=True):
-        """
-        Parameters:
-            patch_size (int or tuple): the patch size we are going to provide.
-        """
         super().__init__()
         self.samples = samples
         self.cuda = cuda
@@ -118,41 +117,57 @@ class DatasetBase(torch.utils.data.IterableDataset):
         while True:
             yield next(self)
 
-
-class SemanticDataset(DatasetBase):
-    def __init__(self, samples: list):
-            #patch_size: Cartesian = DEFAULT_PATCH_SIZE):
-        super().__init__(samples)
-    
     @classmethod
     def from_config(cls, cfg: CfgNode, is_train: bool, **kwargs):
-        """Construct a semantic dataset with chunk or volume
-
-        Args:
-            cfg (CfgNode): _description_
-            is_train (bool): _description_
-
-        Returns:
-            _type_: _description_
-        """
         if is_train:
-            name2chunks = cfg.dataset.training
+            sample_names = cfg.dataset.training
         else:
-            name2chunks = cfg.dataset.validation
+            sample_names = cfg.dataset.validation
 
         samples = []
-        for name2path in name2chunks.values():
-            sample = SemanticSample.from_explicit_dict(
-                    name2path, 
-                    output_patch_size=cfg.train.patch_size,
-                    num_classes=cfg.model.out_channels,
-                    **kwargs)
+        for sample_name in sample_names:
+            # Get Sample class from config, or use default_sample_class
+            sample_cfg = cfg.samples[sample_name]
+            if 'type' in sample_cfg:
+                if sample_cfg.type in sample_classes:
+                    sample_class = sample_classes[sample_cfg.type]
+                else:
+                    raise ValueError(f"Unrecognized Sample class: '{sample_cfg.type}'")
+            elif cls.default_sample_class is not None:
+                sample_class = cls.default_sample_class
+            else:
+                raise ValueError('Sample class is not specified')
+
+            if 'nonzero_bounding_boxes_path' in sample_cfg:
+                sample_nz_bbox_path = sample_cfg.nonzero_bounding_boxes_path
+            elif 'mask' in sample_cfg:
+                mask_filename = os.path.splitext(os.path.split(sample_cfg.mask.split('#')[0])[1])[0]
+                sample_nz_bbox_path = f'{sample_name}_{mask_filename}_nonzero_bboxes.npy'
+            else:
+                sample_nz_bbox_path = None
+
+            sample = sample_class.from_config(
+                sample_cfg,
+                output_patch_size=cfg.train.patch_size,
+                num_classes=cfg.model.out_channels,
+                nonzero_bounding_boxes_path=sample_nz_bbox_path,
+                **kwargs)
             samples.append(sample)
 
-        return cls(samples)
-    
+        return cls(samples, cuda=(cfg.system.gpus > 0))
+
+
+class SemanticDataset(DatasetBase):
+    default_sample_class = SemanticSample
+
+
+class AffinityMapDataset(DatasetBase):
+    default_sample_class = AffinityMapSample
+
 
 class OrganelleDataset(SemanticDataset):
+    default_sample_class = OrganelleSample
+
     def __init__(self, samples: list, 
             num_classes: int = 1,
             skip_classes: list = None,
@@ -225,54 +240,6 @@ class OrganelleDataset(SemanticDataset):
         target = to_tensor(label, self.cuda)
 
         return image, target
-
-
-class AffinityMapDataset(DatasetBase):
-    def __init__(self, samples: list, cuda=True):
-        super().__init__(samples, cuda)
-    
-    @classmethod
-    def from_config(cls, cfg: CfgNode, is_train: bool, **kwargs):
-        """Construct a semantic dataset with chunk or volume
-
-        Args:
-            cfg (CfgNode): _description_
-            is_train (bool): _description_
-
-        Returns:
-            _type_: _description_
-        """
-        if is_train:
-            sample_names = cfg.dataset.training
-        else:
-            sample_names = cfg.dataset.validation
-
-        samples = []
-        for sample_name in sample_names:
-            sample_cfg = cfg.samples[sample_name]
-            if 'type' in sample_cfg:
-                if sample_cfg.type in sample_classes:
-                    sample_class = sample_classes[sample_cfg.type]
-                else:
-                    raise ValueError(f"Unrecognized Sample class: '{sample_cfg.type}'")
-            else:
-                sample_class = AffinityMapSample
-            if 'nonzero_bounding_boxes_path' in sample_cfg:
-                sample_nz_bbox_path = sample_cfg.nonzero_bounding_boxes_path
-            elif 'mask' in sample_cfg:
-                mask_filename = os.path.splitext(os.path.split(sample_cfg.mask.split('#')[0])[1])[0]
-                sample_nz_bbox_path = f'{sample_name}_{mask_filename}_nonzero_bboxes.npy'
-            else:
-                sample_nz_bbox_path = None
-            sample = sample_class.from_config(
-                    sample_cfg,
-                    output_patch_size=cfg.train.patch_size,
-                    num_classes=cfg.model.out_channels,
-                    nonzero_bounding_boxes_path=sample_nz_bbox_path,
-                    **kwargs)
-            samples.append(sample)
-
-        return cls(samples)
 
 
 class BoundaryAugmentationDataset(DatasetBase): 
