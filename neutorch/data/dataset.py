@@ -165,6 +165,14 @@ class AffinityMapDataset(DatasetBase):
     default_sample_class = AffinityMapSample
 
 
+class LSDsDataset(DatasetBase):
+    default_sample_class = LSDsSample
+
+
+class AffinitiesLSDsDataset(DatasetBase):
+    default_sample_class = AffinitiesLSDsSample
+
+
 class OrganelleDataset(SemanticDataset):
     default_sample_class = OrganelleSample
 
