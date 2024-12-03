@@ -233,6 +233,14 @@ class SemanticDataset(DatasetBase):
         return target_chunk
 
 
+class LSDsDataset(DatasetBase):
+    default_sample_class = LSDsSample
+
+
+class AffinitiesLSDsDataset(DatasetBase):
+    default_sample_class = AffinitiesLSDsSample
+
+
 class OrganelleDataset(SemanticDataset):
     default_sample_class = OrganelleSample
 

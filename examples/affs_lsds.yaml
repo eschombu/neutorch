@@ -7,7 +7,7 @@ system:
 #   over images with different characteristics and quality
 samples:
   brain3:
-    type: "AffinityMapSample"
+#    type: "AffinityMapSample"
     images: [
       "precomputed://file:///mnt/ceph/users/neuro/wasp_em/jwu/sample3/05_yuri_v3#preload=False",
       "precomputed://file:///mnt/ceph/users/neuro/wasp_em/jwu/sample3/07_yuri_v5#preload=False",
@@ -16,14 +16,14 @@ samples:
     label: "precomputed://file:///mnt/ceph/users/neuro/wasp_em/jwu/sample3/24_segment_v2/02_proofread_seg#preload=False"
     mask: "precomputed://file:///mnt/ceph/users/neuro/wasp_em/jwu/sample3/20_segmentation_mask#preload=True;cache='/tmp/';mip=3"
   brain2:
-    type: "AffinityMapSample"
+#    type: "AffinityMapSample"
     images: [
       "precomputed://file:///mnt/ceph/users/neuro/wasp_em/jwu/sample2/07_yuri_v2#preload=False",
     ]
     label: "precomputed://file:///mnt/ceph/users/neuro/wasp_em/jwu/sample2/20_seg#preload=False"
     mask: "precomputed://file:///mnt/ceph/users/neuro/wasp_em/jwu/sample2/10_segmentation_mask#preload=True;cache='/tmp/';mip=3"
   vol_04831:
-    type: "AffinityMapSample"
+#    type: "AffinityMapSample"
     images: [
       "/mnt/ceph/neuro/wasp_em/eschomburg/sample2/vol_04831/img_zyx_4931-5131_7467-7667_4272-4472.h5",
     ]
@@ -36,12 +36,14 @@ dataset:
 
 model:
   in_channels: 1
-  out_channels: 13  # first 3 are affinities, other 10 are LSDs
+  out_channels: null  # determined by the number of affinities and LSDs
 
 train:
-  task: "aff+lsd"  # "aff" | "lsd" | "aff+lsd"
+  task: "aff+lsd"  # "lsd" | "aff+lsd"
   num_affinities: 3
+  num_lsds: 10
   lsds_to_affs_weight_ratio: 0.5
+  patch_size: [128, 128, 128]
   iter_start: 0
   iter_stop: 1000000
   class_rebalance: false
@@ -49,7 +51,6 @@ train:
   # The dataprovider should provide nGPU*batch_size batches!
   batch_size: 1
   output_dir: "./"
-  patch_size: [128, 128, 128]
   learning_rate: 0.001
     #training_interval: 200
     #validation_interval: 2000

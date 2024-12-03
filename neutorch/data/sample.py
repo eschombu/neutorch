@@ -9,6 +9,8 @@ from typing import Iterator, List, Tuple, Union
 
 import numpy as np
 import torch.utils.data
+from neutorch.data.transform import Label2LSDs, Label2AffinitiesLSDs, TransformFactory, DropSection, MissAlignment
+from sympy.stats.rv import probability
 from yacs.config import CfgNode
 
 
@@ -41,9 +43,9 @@ def load_chunks_or_volumes(paths: List[str]):
 
 
 class AbstractSample(ABC):
-    def __init__(self, output_patch_size: Cartesian, 
-            is_train: bool = True):
+    transforms = tuple()
 
+    def __init__(self, output_patch_size: Cartesian, is_train: bool = True):
         if isinstance(output_patch_size, int):
             output_patch_size = (output_patch_size,) * 3
         else:
@@ -67,7 +69,7 @@ class AbstractSample(ABC):
             int: the relative weight. The default is 1, 
                 so all the sample have the same weight.
         """
-        return 1 
+        return 1
 
     def __len__(self):
         """number of patches
@@ -77,32 +79,13 @@ class AbstractSample(ABC):
 
     @cached_property
     def transform(self):
-        return Compose([
-            NormalizeTo01(probability=1.),
-            # AdjustContrast(factor_range = (0.95, 1.8)),
-            # AdjustBrightness(min_factor = 0.05, max_factor = 0.2),
-            AdjustContrast(),
-            AdjustBrightness(),
-            Gamma(),
-            OneOf([
-                Noise(),
-                GaussianBlur2D(),
-            ]),
-            MaskBox(),
-            # Perspective2D(),
-            # RotateScale(probability=1.),
-            DropSection(probability=0.5),
-            Flip(),
-            Transpose(),
-            # MissAlignment(),
-        ])
+        return Compose(self.transforms)
 
     @cached_property
     def patch_size_before_transform(self):
         return self.output_patch_size + \
             self.transform.shrink_size[:3] + \
             self.transform.shrink_size[-3:]
-
 
 
 # class BlockAlignedVolumeSample(AbstractSample):
@@ -141,6 +124,8 @@ class AbstractSample(ABC):
 
 
 class Sample(AbstractSample):
+    transforms = TransformFactory.defaults()
+
     def __init__(self, 
             input_cvs: List[Chunk | PrecomputedVolume],
             label_cvs: List[Chunk | PrecomputedVolume],
@@ -372,7 +357,6 @@ class Sample(AbstractSample):
             input_cvs.append(cvs)
         
         return cls(input_cvs, label_cvs, output_patch_size)
-        
 
     @property
     def random_patch_center(self):
@@ -600,6 +584,8 @@ class SampleWithPointAnnotation(Sample):
 
 
 class PostSynapseReference(AbstractSample):
+    transforms = TransformFactory.defaults()
+
     def __init__(self,
             synapses: Synapses,
             inputs: List[Chunk], 
@@ -675,6 +661,8 @@ class PostSynapseReference(AbstractSample):
 
 
 class SemanticSample(Sample):
+    transforms = TransformFactory.defaults(drop_section=DropSection(probability=1.))
+
     def __init__(self, 
             inputs: List[Chunk | PrecomputedVolume],
             label: Chunk | PrecomputedVolume,
@@ -746,28 +734,6 @@ class SemanticSample(Sample):
     @cached_property
     def class_counts(self):
         return np.bincount(self.label.flatten(), minlength=self.num_classes)
-    
-    @cached_property
-    def transform(self):
-        return Compose([
-            NormalizeTo01(probability=1.),
-            # AdjustContrast(factor_range = (0.95, 1.8)),
-            # AdjustBrightness(min_factor = 0.05, max_factor = 0.2),
-            AdjustContrast(),
-            AdjustBrightness(),
-            Gamma(),
-            OneOf([
-                Noise(),
-                GaussianBlur2D(),
-            ]),
-            MaskBox(),
-            # Perspective2D(),
-            # RotateScale(probability=1.),
-            DropSection(probability=1.),
-            Flip(),
-            Transpose(),
-            # MissAlignment(),
-        ])
 
 
 class OrganelleSample(SemanticSample):
@@ -796,46 +762,24 @@ class OrganelleSample(SemanticSample):
 
 
 class AffinityMapSample(SemanticSample):
+    transforms = TransformFactory.defaults(
+        drop_section=False,
+        misalign=MissAlignment(),
+        label2affinity=Label2AffinityMap(probability=1.),
+    )
+
     def __init__(self,
             inputs: List[Union[Chunk, PrecomputedVolume]],
             label: Union[Chunk, PrecomputedVolume],
             output_patch_size: Cartesian,
             num_classes: int = 3,
-            mask: Chunk | PrecomputedVolume = None,
+            mask: Union[Chunk, PrecomputedVolume] = None,
             forbidden_distance_to_boundary: tuple = None,
             patches_in_block: int = 8,
             candidate_bounding_boxes_path: str = None,
     ) -> None:
         super().__init__(inputs, label, output_patch_size, num_classes, mask, forbidden_distance_to_boundary,
                          patches_in_block, candidate_bounding_boxes_path)
-    
-    @classmethod
-    def from_explicit_path(cls, 
-            image_paths: list,
-            label_path: str,
-            output_patch_size: Cartesian,
-            num_classes: int = 3,
-            **kwargs,
-            ):
-        label = load_chunk_or_volume(label_path, **kwargs)
-        logger.debug(f'label path: {label_path} with size {label.shape}')
-
-        inputs = []
-        for image_path in image_paths:
-            image = load_chunk_or_volume(image_path, **kwargs)
-            inputs.append(image)
-            logger.debug(f'image path: {image_path} with size {image.shape}')
-        return cls(inputs, label, output_patch_size=output_patch_size, num_classes=num_classes)
-    
-    @classmethod
-    def from_explicit_dict(cls, 
-            d: dict, 
-            output_patch_size: Cartesian,
-            num_classes: int = 3):
-        image_paths = d['inputs']
-        label_path = d['label']
-        return cls.from_explicit_path(
-            image_paths, label_path, output_patch_size, num_classes=num_classes)
 
     @classmethod
     def from_config_node(cls, 
@@ -843,7 +787,7 @@ class AffinityMapSample(SemanticSample):
             output_patch_size: Cartesian,
             num_classes: int=3,
             **kwargs,
-        ):
+    ):
         label_path = os.path.join(cfg.dir, cfg.label)
         label = load_chunk_or_volume(label_path, **kwargs)
 
@@ -860,60 +804,37 @@ class AffinityMapSample(SemanticSample):
         return cls(inputs, label, output_patch_size, num_classes=num_classes)
 
 
-    @cached_property
-    def transform(self):
-        return Compose([
-            NormalizeTo01(probability=1.),
-            AdjustBrightness(),
-            AdjustContrast(),
-            Gamma(),
-            OneOf([
-                Noise(),
-                GaussianBlur2D(),
-            ]),
-            MaskBox(),
-            # Perspective2D(),
-            # RotateScale(probability=1.),
-            # DropSection(),
-            Flip(),
-            Transpose(),
-            MissAlignment(),
-            Label2AffinityMap(probability=1.),
-        ])
+class LSDsSample(Sample):
+    transforms = tuple(list(AffinityMapSample.transforms[:-1]) + [Label2LSDs(probability=1.)])
 
 
-class AffinityMapSample(Sample):
-    @cached_property
-    def transform(self):
-        return Compose([
-            NormalizeTo01(probability=1.),
-            AdjustBrightness(),
-            AdjustContrast(),
-            Gamma(),
-            OneOf([
-                Noise(),
-                GaussianBlur2D(),
-            ]),
-            MaskBox(),
-            # Perspective2D(),
-            # RotateScale(probability=1.),
-            # DropSection(),
-            Flip(),
-            Transpose(),
-            MissAlignment(),
-            Label2AffinityMap(probability=1.),
-        ])
+class AffinitiesLSDsSample(Sample):
+    transforms = tuple(list(AffinityMapSample.transforms[:-1]) + [Label2AffinitiesLSDs(probability=1.)])
 
 
 class SelfSupervisedSample(Sample):
+    transforms = tuple([
+        NormalizeTo01(probability=1.),
+        AdjustContrast(),
+        AdjustBrightness(),
+        Gamma(),
+        OneOf([
+            Noise(),
+            GaussianBlur2D(),
+        ]),
+        MaskBox(),
+        # Flip(),
+        # Transpose(),
+    ])
+
     def __init__(self,
-            inputs: List[Chunk], 
+            inputs: List[Chunk],
             label: Union[np.ndarray, Chunk],
             output_patch_size: Cartesian,
             normalize: bool = False,  # unused!?!
             forbidden_distance_to_boundary: tuple = None,
     ) -> None:
-        super().__init__(inputs, label, output_patch_size, forbidden_distance_to_boundary)
+        super().__init__(images, label, output_patch_size, forbidden_distance_to_boundary)
 
     @classmethod
     def from_explicit_paths(cls, 
@@ -937,24 +858,10 @@ class SelfSupervisedSample(Sample):
         logger.debug(f'image path: {image_path} with size {image.shape}')
         return cls([image], image, output_patch_size)
 
-    @cached_property
-    def transform(self):
-        return Compose([
-            NormalizeTo01(probability=1.),
-            AdjustContrast(),
-            AdjustBrightness(),
-            Gamma(),
-            OneOf([
-                Noise(),
-                GaussianBlur2D(),
-            ]),
-            MaskBox(),
-            # Flip(),
-            # Transpose(),
-        ])
-
 
 class NeuropilMaskSample(Sample):
+    transforms = tuple(AffinityMapSample.transforms)
+
     def __init__(self, 
             inputs: List[AbstractVolume], 
             label: Union[Chunk, AbstractVolume], 
@@ -990,27 +897,6 @@ class NeuropilMaskSample(Sample):
     #@property
     #def random_patch_center(self):
     #    """biased to mask boundary"""
-    
-    @cached_property
-    def transform(self):
-        return Compose([
-            NormalizeTo01(probability=1.),
-            AdjustBrightness(),
-            AdjustContrast(),
-            Gamma(),
-            OneOf([
-                Noise(),
-                GaussianBlur2D(),
-            ]),
-            MaskBox(),
-            # Perspective2D(),
-            # RotateScale(probability=1.),
-            # DropSection(),
-            Flip(),
-            Transpose(),
-            MissAlignment(),
-            Label2AffinityMap(probability=1.),
-        ])
 
 
 if __name__ == '__main__':
