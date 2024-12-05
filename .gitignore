@@ -5,6 +5,7 @@
 .secrets.baseline
 *.code-workspace
 *.vscode
+.uuid
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
