@@ -16,15 +16,12 @@ from yacs.config import CfgNode
 
 from chunkflow.chunk import Chunk
 from chunkflow.lib.cartesian_coordinate import BoundingBox, Cartesian, BoundingBoxes
-from chunkflow.lib.synapses import Synapses
-from chunkflow.volume import PrecomputedVolume, AbstractVolume, \
-    get_candidate_block_bounding_boxes_with_different_voxel_size
+from chunkflow.synapses import Synapses
+from chunkflow.volume import get_candidate_block_bounding_boxes_with_different_voxel_size, load_chunk_or_volume
+from chunkflow.volume import AbstractVolume, PrecomputedVolume
 
-from .patch import expand_to_4d
-from neutorch.data.patch import Patch
+from neutorch.data.patch import expand_to_4d, Patch
 from neutorch.data.patch_bounding_box_generator import generate_patch_bounding_boxes
-# from neutorch.data.patch_bounding_box_generator import (
-#     PatchBoundingBoxGeneratorInChunk, PatchBoundingBoxGeneratorInsideMask)
 from neutorch.data.transform import *
 from neutorch.utils.log_utils import get_logger
 
@@ -32,14 +29,6 @@ logger = get_logger()
 
 DEFAULT_PATCH_SIZE = Cartesian(128, 128, 128)
 DEFAULT_NUM_CLASSES = 1
-
-
-def load_chunks_or_volumes(paths: List[str]):
-    inputs = []
-    for image_path in paths:
-        image_vol = load_chunk_or_volume(image_path)
-        inputs.append(image_vol)
-    return inputs 
 
 
 class AbstractSample(ABC):
@@ -211,7 +200,7 @@ class Sample(AbstractSample):
 
     @classmethod
     def from_config(cls, config: CfgNode,
-            output_patch_size: Cartesian,
+            output_patch_size: Cartesian = DEFAULT_PATCH_SIZE,
             **kwargs) -> Sample:
         inputs = []
         for image_path in config.images:
@@ -223,6 +212,7 @@ class Sample(AbstractSample):
             mask = load_chunk_or_volume(config.mask)
         else:
             mask = None
+
         opt_args = {
             'forbidden_distance_to_boundary': config.get('forbidden_distance_to_boundary'),
             'patches_in_block': config.get('patches_in_block'),
@@ -473,7 +463,7 @@ class Sample(AbstractSample):
             bboxes = BoundingBoxes.from_file(self._candidate_bounding_boxes_path)
         else:
             bboxes = get_candidate_block_bounding_boxes_with_different_voxel_size(
-                self.mask, self.label.voxel_size, self.label.block_size
+                self.mask, self.label.voxel_size, self.label.block_size,
             )
             if self._candidate_bounding_boxes_path:
                 bboxes.to_file(self._candidate_bounding_boxes_path)

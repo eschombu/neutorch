@@ -14,29 +14,6 @@ DEFAULT_PATCH_SIZE = Cartesian(128, 128, 128)
 sample_classes = {name: c for name, c in locals().items() if isinstance(c, type) and issubclass(c, AbstractSample)}
 
 
-<<<<<<< HEAD
-def get_iter_range(sample_num: int) -> tuple[int, int]:
-    # multiprocess data loading 
-    worker_info = torch.utils.data.get_worker_info()
-    iter_start = 0
-    iter_stop = sample_num
-    if worker_info is not None:
-        # multiple processing for data loading, split workload
-        worker_id = worker_info.id
-        if sample_num > worker_info.num_workers:
-            per_worker = int(math.ceil(
-                (iter_end - iter_start) / float(worker_info.num_workers)))
-            iter_start = iter_start + worker_id * per_worker
-            iter_end = min(iter_start + per_worker, iter_end)
-        else:
-            iter_start = worker_id % sample_num
-            iter_stop = iter_start + 1
-    
-    return iter_start, iter_stop
-
-
-=======
->>>>>>> 8ed3350 (remove/consolidate some redundant code in Dataset class defs)
 def load_cfg(cfg_file: str, freeze: bool = True):
     with open(cfg_file) as file:
         cfg = CfgNode.load_cfg(file)
@@ -180,47 +157,48 @@ class DatasetBase(torch.utils.data.IterableDataset):
         return next(self)
 
     @classmethod
+    def _sample_from_config(cls, sample_name: str, sample_cfg: CfgNode, patch_size: CfgNode, **kwargs):
+        if 'type' in sample_cfg:
+            if sample_cfg.type in sample_classes:
+                sample_class = sample_classes[sample_cfg.type]
+            else:
+                raise ValueError(f"Unrecognized Sample class: '{sample_cfg.type}'")
+        elif cls.default_sample_class is not None:
+            sample_class = cls.default_sample_class
+        else:
+            raise ValueError('Sample class is not specified')
+
+        if 'nonzero_bounding_boxes_path' in sample_cfg:
+            sample_nz_bbox_path = sample_cfg.nonzero_bounding_boxes_path
+        elif 'mask' in sample_cfg:
+            mask_filename = os.path.splitext(os.path.split(sample_cfg.mask.split('#', 1)[0])[1])[0]
+            sample_nz_bbox_path = f'{sample_name}_{mask_filename}_nonzero_bboxes.npy'
+        else:
+            sample_nz_bbox_path = None
+
+        return sample_class.from_config(
+            sample_cfg,
+            output_patch_size=patch_size,
+            nonzero_bounding_boxes_path=sample_nz_bbox_path,
+            **kwargs)
+
+
+    @classmethod
     def from_config(cls, cfg: CfgNode, is_train: bool = True, **kwargs):
         if is_train:
             sample_names = cfg.dataset.training
         else:
             sample_names = cfg.dataset.validation
+        patch_size = Cartesian.from_collection(cfg.train.patch_size)
 
         samples = []
         for sample_name in sample_names:
             # Get Sample class from config, or use default_sample_class
             sample_cfg = cfg.samples[sample_name]
-            if 'type' in sample_cfg:
-                if sample_cfg.type in sample_classes:
-                    sample_class = sample_classes[sample_cfg.type]
-                else:
-                    raise ValueError(f"Unrecognized Sample class: '{sample_cfg.type}'")
-            elif cls.default_sample_class is not None:
-                sample_class = cls.default_sample_class
-            else:
-                raise ValueError('Sample class is not specified')
-
-            if 'nonzero_bounding_boxes_path' in sample_cfg:
-                sample_nz_bbox_path = sample_cfg.nonzero_bounding_boxes_path
-            elif 'mask' in sample_cfg:
-                mask_filename = os.path.splitext(os.path.split(sample_cfg.mask.split('#')[0])[1])[0]
-                sample_nz_bbox_path = f'{sample_name}_{mask_filename}_nonzero_bboxes.npy'
-            else:
-                sample_nz_bbox_path = None
-
-            sample = sample_class.from_config(
-                sample_cfg,
-                output_patch_size=cfg.train.patch_size,
-                num_classes=cfg.model.out_channels,
-                nonzero_bounding_boxes_path=sample_nz_bbox_path,
-                **kwargs)
+            sample = cls._sample_from_config(sample_name, sample_cfg, patch_size, **kwargs)
             samples.append(sample)
 
         return cls(samples, cuda=(cfg.system.gpus > 0))
-
-
-class AffinityMapDataset(DatasetBase):
-    default_sample_class = AffinityMapSample
 
 
 class SemanticDataset(DatasetBase):
@@ -231,6 +209,16 @@ class SemanticDataset(DatasetBase):
         assert isinstance(target_chunk, Chunk)
         # label = (label > 0).to(torch.float32)
         return target_chunk
+
+    @classmethod
+    def _sample_from_config(cls, sample_name: str, sample_cfg: CfgNode, **kwargs):
+        semantic_kwargs = dict(num_classes=cfg.model.out_channels)
+        semantic_kwargs.update(kwargs)
+        return super(cls)._sample_from_config(sample_name, sample_cfg, **semantic_kwargs)
+
+
+class AffinityMapDataset(DatasetBase):
+    default_sample_class = AffinityMapSample
 
 
 class LSDsDataset(DatasetBase):
